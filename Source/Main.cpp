@@ -987,7 +987,7 @@ private: // Functions
     void Render(void)
     {
         uint32_t SwapchainIndex = 0;
-        Assert(vkAcquireNextImageKHR(Device, Swapchain, 1 * NANOSECONDS_PER_SECOND, RenderSemaphores[CurrentFrame], nullptr, &SwapchainIndex) == VK_SUCCESS, "Could not get next surface image");
+        Assert(vkAcquireNextImageKHR(Device, Swapchain, 1 * NANOSECONDS_PER_SECOND, RenderSemaphores[FrameIndex], nullptr, &SwapchainIndex) == VK_SUCCESS, "Could not get next surface image");
 
         // Color buffer clear color
         VkClearValue ClearColor;
@@ -1048,7 +1048,7 @@ private: // Functions
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .pNext = nullptr,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &RenderSemaphores[CurrentFrame],
+            .pWaitSemaphores = &RenderSemaphores[FrameIndex],
             .pWaitDstStageMask = WaitDstStageMasks,
             .commandBufferCount = 1,
             .pCommandBuffers = &CommandBuffer,
@@ -1074,7 +1074,7 @@ private: // Functions
         Assert(vkWaitForFences(Device, 1, &Fence, VK_TRUE, 1 * NANOSECONDS_PER_SECOND) == VK_SUCCESS, "Fence timeout");
         Assert(vkResetFences(Device, 1, &Fence) == VK_SUCCESS, "Could not reset fence");
 
-        CurrentFrame = (CurrentFrame + 1) % NumSwapchainImages;
+        FrameIndex = (FrameIndex + 1) % NumSwapchainImages;
     }
 
 public: // Functions
