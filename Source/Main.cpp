@@ -113,7 +113,7 @@ private: // Variables
     VkSemaphore                         RenderSemaphores[MaxSwapchainImages] {};
     VkSemaphore                         PresentSemaphores[MaxSwapchainImages] {};
     
-    uint32_t                            CurrentFrame { 0 };
+    uint32_t                            FrameIndex { 0 }; // 0 to NumSwapchainImages
 
     VkBuffer                            VertexBuffer { nullptr };
     VkDeviceMemory                      VertexBufferMemory { nullptr };
@@ -177,16 +177,6 @@ private: // Functions
 
         std::vector<const char*> RequiredLayers;
         std::vector<const char*> RequiredExtensions(RequiredSDLExtensions, RequiredSDLExtensions + ExtCount);
-
-        // DEBUG:
-        for (uint32_t i = 0; i < ExtCount; i++)
-        {
-            if (strcmp(RequiredExtensions[i], RequiredSDLExtensions[i]) != 0)
-            {
-                printf("EXTREMELY BAD!\n");
-                exit(-1);
-            }
-        }
 
 #ifdef DEBUG // Only add the validation layer/extension if this is a debug build
         RequiredLayers.push_back("VK_LAYER_KHRONOS_validation");
@@ -425,11 +415,6 @@ private: // Functions
     {
         for (uint32_t i = 0; i < MemoryProperties.memoryTypeCount; i++)
         {
-            // DEBUG:
-            printf("Memory type %u: %s\n", i, (rMemoryRequirements.memoryTypeBits & (1 << i)) ? "Supported" : "Not supported");
-            printf("\t%s\n", ((MemoryProperties.memoryTypes[i].propertyFlags & Flags) == Flags) ? "Flags match" : "Flag mismatch");
-            printf("\t %u %u %s\n\n", MemoryProperties.memoryTypes[i].heapIndex, HeapIndex, (MemoryProperties.memoryTypes[i].heapIndex == HeapIndex) ? "Heap match" : "Heap mismatch");
-
             if ((rMemoryRequirements.memoryTypeBits & (1 << i))
                 && ((MemoryProperties.memoryTypes[i].propertyFlags & Flags) == Flags)
                 && (MemoryProperties.memoryTypes[i].heapIndex == HeapIndex))
@@ -458,13 +443,6 @@ private: // Functions
         {
             uint64_t HeapSize = MemoryProperties.memoryHeaps[MemoryProperties.memoryTypes[i].heapIndex].size;
 
-            // DEBUG:
-            printf("Memory type %u\n", i);
-            printf("\tHeap: %u\n", MemoryProperties.memoryTypes[i].heapIndex);
-            printf("\tSize: %llu MB\n", HeapSize / (1024 * 1024));
-            printf("\t%s\n", (MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0 ? "Local" : "Non-Local");
-            printf("\t%s\n", (MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0 ? "Host-Visible" : "Host-Invisible");
-
             if (MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
             {
                 if ((PrimaryHeapIndex == UINT32_MAX) || (HeapSize > MemoryProperties.memoryHeaps[PrimaryHeapIndex].size))
@@ -474,8 +452,6 @@ private: // Functions
             }
         }
 
-        // DEBUG:
-        printf("PICK HEAP %u\n", PrimaryHeapIndex);
         Assert(PrimaryHeapIndex != UINT32_MAX, "Could not find primary heap");
     }
 
