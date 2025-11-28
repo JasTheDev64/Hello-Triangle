@@ -7,8 +7,8 @@
 #include <map>
 #include <vector>
 
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_vulkan.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
 #include <vulkan/vulkan.h>
 
@@ -91,13 +91,6 @@ private: // Variables
     VkPhysicalDeviceMemoryProperties    MemoryProperties {};
 
     uint32_t                            PrimaryHeapIndex { UINT32_MAX };
-    uint32_t                            UploadHeapIndex { UINT32_MAX };
-
-    VkBuffer                            UploadBuffer { nullptr };
-    VkDeviceMemory                      UploadBufferMemory { nullptr };
-
-    uint64_t                            UploadBufferSize { 0 };
-    void*                               UploadBufferCpuVA { nullptr };
     
     uint32_t                            GraphicsQueueGroup { UINT32_MAX };
 
@@ -117,11 +110,14 @@ private: // Variables
     VkRenderPass                        RenderPass { nullptr };
     VkFramebuffer                       Framebuffers[MaxSwapchainImages] {};
 
-    VkSemaphore                         AcquireSemaphore { nullptr };
-    VkSemaphore                         ReleaseSemaphore { nullptr };
+    VkSemaphore                         RenderSemaphores[MaxSwapchainImages] {};
+    VkSemaphore                         PresentSemaphores[MaxSwapchainImages] {};
+    
+    uint32_t                            CurrentFrame { 0 };
 
     VkBuffer                            VertexBuffer { nullptr };
     VkDeviceMemory                      VertexBufferMemory { nullptr };
+    void*                               VertexBufferCpuVA { nullptr };
 
     VkPipelineLayout                    PipelineLayout { nullptr };
     VkPipeline                          GraphicsPipeline { nullptr };
@@ -143,10 +139,10 @@ private: // Functions
 
     void CreateWindow(void)
     {
-        Assert(SDL_Init(SDL_INIT_EVERYTHING) == 0, "Could not initialize SDL");
-        Assert(SDL_Vulkan_LoadLibrary(nullptr) == 0, "Could not load the vulkan library");
+        Assert(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS), "Could not initialize SDL");
+        Assert(SDL_Vulkan_LoadLibrary(nullptr), "Could not load the vulkan library");
 
-        Window = SDL_CreateWindow(APP_NAME, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN);
+        Window = SDL_CreateWindow(APP_NAME, WIDTH, HEIGHT, SDL_WINDOW_VULKAN);
         Assert(Window != nullptr, "Could not create SDL window");
     }
 
@@ -176,11 +172,21 @@ private: // Functions
             }
         }
 
-        Assert(SDL_Vulkan_GetInstanceExtensions(Window, &ExtCount, nullptr) == SDL_TRUE, "Could not get number of required SDL extensions");
+        char const* const* RequiredSDLExtensions = SDL_Vulkan_GetInstanceExtensions(&ExtCount);
+        Assert(RequiredSDLExtensions != nullptr, "Could not get number of required SDL extensions");
 
         std::vector<const char*> RequiredLayers;
-        std::vector<const char*> RequiredExtensions(ExtCount);
-        Assert(SDL_Vulkan_GetInstanceExtensions(Window, &ExtCount, RequiredExtensions.data()) == SDL_TRUE, "Could not get required SDL extensions");
+        std::vector<const char*> RequiredExtensions(RequiredSDLExtensions, RequiredSDLExtensions + ExtCount);
+
+        // DEBUG:
+        for (uint32_t i = 0; i < ExtCount; i++)
+        {
+            if (strcmp(RequiredExtensions[i], RequiredSDLExtensions[i]) != 0)
+            {
+                printf("EXTREMELY BAD!\n");
+                exit(-1);
+            }
+        }
 
 #ifdef DEBUG // Only add the validation layer/extension if this is a debug build
         RequiredLayers.push_back("VK_LAYER_KHRONOS_validation");
@@ -419,6 +425,11 @@ private: // Functions
     {
         for (uint32_t i = 0; i < MemoryProperties.memoryTypeCount; i++)
         {
+            // DEBUG:
+            printf("Memory type %u: %s\n", i, (rMemoryRequirements.memoryTypeBits & (1 << i)) ? "Supported" : "Not supported");
+            printf("\t%s\n", ((MemoryProperties.memoryTypes[i].propertyFlags & Flags) == Flags) ? "Flags match" : "Flag mismatch");
+            printf("\t %u %u %s\n\n", MemoryProperties.memoryTypes[i].heapIndex, HeapIndex, (MemoryProperties.memoryTypes[i].heapIndex == HeapIndex) ? "Heap match" : "Heap mismatch");
+
             if ((rMemoryRequirements.memoryTypeBits & (1 << i))
                 && ((MemoryProperties.memoryTypes[i].propertyFlags & Flags) == Flags)
                 && (MemoryProperties.memoryTypes[i].heapIndex == HeapIndex))
@@ -447,48 +458,25 @@ private: // Functions
         {
             uint64_t HeapSize = MemoryProperties.memoryHeaps[MemoryProperties.memoryTypes[i].heapIndex].size;
 
-            if (MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+            // DEBUG:
+            printf("Memory type %u\n", i);
+            printf("\tHeap: %u\n", MemoryProperties.memoryTypes[i].heapIndex);
+            printf("\tSize: %llu MB\n", HeapSize / (1024 * 1024));
+            printf("\t%s\n", (MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0 ? "Local" : "Non-Local");
+            printf("\t%s\n", (MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0 ? "Host-Visible" : "Host-Invisible");
+
+            if (MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
             {
                 if ((PrimaryHeapIndex == UINT32_MAX) || (HeapSize > MemoryProperties.memoryHeaps[PrimaryHeapIndex].size))
                 {
                     PrimaryHeapIndex = MemoryProperties.memoryTypes[i].heapIndex;
                 }
             }
-
-            if (((MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == 0)
-                && (MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
-            {
-                if ((UploadHeapIndex == UINT32_MAX) || (HeapSize > MemoryProperties.memoryHeaps[UploadHeapIndex].size))
-                {
-                    UploadHeapIndex = MemoryProperties.memoryTypes[i].heapIndex;
-                    UploadBufferSize = std::min(ALIGN(HeapSize / 4, MB), static_cast<uint64_t>(16 * MB));
-                }
-            }
         }
 
+        // DEBUG:
+        printf("PICK HEAP %u\n", PrimaryHeapIndex);
         Assert(PrimaryHeapIndex != UINT32_MAX, "Could not find primary heap");
-        Assert(UploadHeapIndex != UINT32_MAX, "Could not find upload heap");
-
-        VkBufferCreateInfo UploadBufferInfo =
-        {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = 0,
-            .size = UploadBufferSize,
-            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .queueFamilyIndexCount = 0,
-            .pQueueFamilyIndices = nullptr
-        };
-
-        Assert(vkCreateBuffer(Device, &UploadBufferInfo, nullptr, &UploadBuffer) == VK_SUCCESS, "Failed to create upload buffer");
-
-        VkMemoryRequirements UploadBufferRequirements = {};
-        vkGetBufferMemoryRequirements(Device, UploadBuffer, &UploadBufferRequirements);
-
-        AllocateMemory(UploadBufferRequirements, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, UploadHeapIndex, UploadBufferMemory);
-        Assert(vkBindBufferMemory(Device, UploadBuffer, UploadBufferMemory, 0) == VK_SUCCESS, "Failed to bind upload buffer memory");
-        Assert(vkMapMemory(Device, UploadBufferMemory, 0, UploadBufferSize, 0, &UploadBufferCpuVA) == VK_SUCCESS, "Failed to map upload buffer memory");
     }
 
     void CreateSwapchain(void)
@@ -555,8 +543,11 @@ private: // Functions
             .flags = 0
         };
 
-        Assert(vkCreateSemaphore(Device, &SemaphoreInfo, nullptr, &AcquireSemaphore) == VK_SUCCESS, "Failed to create semaphore");
-        Assert(vkCreateSemaphore(Device, &SemaphoreInfo, nullptr, &ReleaseSemaphore) == VK_SUCCESS, "Failed to create semaphore");
+        for (uint32_t i = 0; i < NumSwapchainImages; i++)
+        {
+            Assert(vkCreateSemaphore(Device, &SemaphoreInfo, nullptr, &RenderSemaphores[i]) == VK_SUCCESS, "Failed to create render semaphore %u", i);
+            Assert(vkCreateSemaphore(Device, &SemaphoreInfo, nullptr, &PresentSemaphores[i]) == VK_SUCCESS, "Failed to create present semaphore %u", i);
+        }
     }
 
     void CreateRenderPass(void)
@@ -678,7 +669,7 @@ private: // Functions
             .pNext = nullptr,
             .flags = 0,
             .size = sizeof(TriangleVertices),
-            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
             .queueFamilyIndexCount = 0,
             .pQueueFamilyIndices = nullptr
@@ -689,56 +680,21 @@ private: // Functions
         VkMemoryRequirements BufferRequirements = {};
         vkGetBufferMemoryRequirements(Device, VertexBuffer, &BufferRequirements);
 
-        AllocateMemory(BufferRequirements, PrimaryHeapIndex, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VertexBufferMemory);
+        AllocateMemory(BufferRequirements, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, PrimaryHeapIndex, VertexBufferMemory);
         Assert(vkBindBufferMemory(Device, VertexBuffer, VertexBufferMemory, 0) == VK_SUCCESS, "Failed to bind vertex buffer memory");
+        Assert(vkMapMemory(Device, VertexBufferMemory, 0, BufferInfo.size, 0, &VertexBufferCpuVA) == VK_SUCCESS, "Failed to map upload buffer memory");
 
         VkMappedMemoryRange FlushRange =
         {
             .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
             .pNext = nullptr,
-            .memory = UploadBufferMemory,
+            .memory = VertexBufferMemory,
             .offset = 0,
             .size = VK_WHOLE_SIZE
         };
 
-        memcpy(reinterpret_cast<uint8_t*>(UploadBufferCpuVA), TriangleVertices, sizeof(TriangleVertices));
+        memcpy(reinterpret_cast<uint8_t*>(VertexBufferCpuVA), TriangleVertices, sizeof(TriangleVertices));
         Assert(vkFlushMappedMemoryRanges(Device, 1, &FlushRange) == VK_SUCCESS, "Failed to flush vertex buffer memory");
-
-        VkCommandBufferBeginInfo CommandBufferBeginInfo =
-        {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext = nullptr,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-            .pInheritanceInfo = nullptr
-        };
-
-        VkBufferCopy CopyCmd =
-        {
-            .srcOffset = 0,
-            .dstOffset = 0,
-            .size = sizeof(TriangleVertices)
-        };
-
-        Assert(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo) == VK_SUCCESS, "Failed to initialize command buffer");
-        vkCmdCopyBuffer(CommandBuffer, UploadBuffer, VertexBuffer, 1, &CopyCmd);
-        Assert(vkEndCommandBuffer(CommandBuffer) == VK_SUCCESS, "Failed to finalize command buffer");
-
-        VkSubmitInfo SubmitInfo =
-        {
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .pNext = nullptr,
-            .waitSemaphoreCount = 0,
-            .pWaitSemaphores = nullptr,
-            .pWaitDstStageMask = nullptr,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &CommandBuffer,
-            .signalSemaphoreCount = 0,
-            .pSignalSemaphores = nullptr
-        };
-
-        Assert(vkQueueSubmit(GraphicsQueue, 1, &SubmitInfo, Fence) == VK_SUCCESS, "Failed to submit command buffer");
-        Assert(vkWaitForFences(Device, 1, &Fence, VK_TRUE, 1 * NANOSECONDS_PER_SECOND) == VK_SUCCESS, "Fence timeout");
-        Assert(vkResetFences(Device, 1, &Fence) == VK_SUCCESS, "Could not reset fence");
     }
 
     void CreateGraphicsPipeline(void)
@@ -998,7 +954,6 @@ private: // Functions
             };
 
             Assert(vkCreateGraphicsPipelines(Device, nullptr, 1, &GraphicsPipelineInfo, nullptr, &GraphicsPipeline) == VK_SUCCESS, "Failed to create graphics pipeline");
-
         }
         catch (...)
         {
@@ -1030,14 +985,14 @@ private: // Functions
         {
             switch (event.type)
             {
-                case SDL_QUIT:
+                case SDL_EVENT_QUIT:
                 {
                     Running = false; // The main loop will exit once this becomes false
                     break;
                 }
-                case SDL_KEYDOWN:
+                case SDL_EVENT_KEY_DOWN:
                 {
-                    switch (event.key.keysym.scancode)
+                    switch (event.key.scancode)
                     {
                         case SDL_SCANCODE_ESCAPE:
                             Running = false; // The main loop will exit once this becomes false
@@ -1056,7 +1011,7 @@ private: // Functions
     void Render(void)
     {
         uint32_t SwapchainIndex = 0;
-        Assert(vkAcquireNextImageKHR(Device, Swapchain, UINT64_MAX, AcquireSemaphore, nullptr, &SwapchainIndex) == VK_SUCCESS, "Could not get next surface image");
+        Assert(vkAcquireNextImageKHR(Device, Swapchain, 1 * NANOSECONDS_PER_SECOND, RenderSemaphores[CurrentFrame], nullptr, &SwapchainIndex) == VK_SUCCESS, "Could not get next surface image");
 
         // Color buffer clear color
         VkClearValue ClearColor;
@@ -1117,12 +1072,12 @@ private: // Functions
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .pNext = nullptr,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &AcquireSemaphore,
+            .pWaitSemaphores = &RenderSemaphores[CurrentFrame],
             .pWaitDstStageMask = WaitDstStageMasks,
             .commandBufferCount = 1,
             .pCommandBuffers = &CommandBuffer,
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &ReleaseSemaphore
+            .pSignalSemaphores = &PresentSemaphores[SwapchainIndex]
         };
 
         VkPresentInfoKHR PresentInfo =
@@ -1130,7 +1085,7 @@ private: // Functions
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .pNext = nullptr,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &ReleaseSemaphore,
+            .pWaitSemaphores = &PresentSemaphores[SwapchainIndex],
             .swapchainCount = 1,
             .pSwapchains = &Swapchain,
             .pImageIndices = &SwapchainIndex,
@@ -1139,9 +1094,11 @@ private: // Functions
 
         Assert(vkQueueSubmit(GraphicsQueue, 1, &SubmissionInfo, Fence) == VK_SUCCESS, "Failed to submit command buffer");
         Assert(vkQueuePresentKHR(GraphicsQueue, &PresentInfo) == VK_SUCCESS, "Failed to present");
-        
+
         Assert(vkWaitForFences(Device, 1, &Fence, VK_TRUE, 1 * NANOSECONDS_PER_SECOND) == VK_SUCCESS, "Fence timeout");
         Assert(vkResetFences(Device, 1, &Fence) == VK_SUCCESS, "Could not reset fence");
+
+        CurrentFrame = (CurrentFrame + 1) % NumSwapchainImages;
     }
 
 public: // Functions
@@ -1154,7 +1111,7 @@ public: // Functions
         CreateGraphicsQueue();
         InitializeMemoryHeaps();
         
-        Assert(SDL_Vulkan_CreateSurface(Window, Instance, &Surface) == VK_TRUE, "Failed to create surface");
+        Assert(SDL_Vulkan_CreateSurface(Window, Instance, nullptr, &Surface) == VK_TRUE, "Failed to create surface");
         CreateSwapchain();
         CreateRenderPass();
         CreateFramebuffers();
@@ -1172,7 +1129,10 @@ public: // Functions
 
         if (VertexBufferMemory != nullptr)
         {
+            vkUnmapMemory(Device, VertexBufferMemory);
             vkFreeMemory(Device, VertexBufferMemory, nullptr);
+            
+            VertexBufferCpuVA = nullptr;
             VertexBufferMemory = nullptr;
         }
 
@@ -1215,16 +1175,19 @@ public: // Functions
             RenderPass = nullptr;
         }
 
-        if (AcquireSemaphore != nullptr)
+        for (uint32_t i = 0; i < MaxSwapchainImages; i++)
         {
-            vkDestroySemaphore(Device, AcquireSemaphore, nullptr);
-            AcquireSemaphore = nullptr;
-        }
+            if (RenderSemaphores[i] != nullptr)
+            {
+                vkDestroySemaphore(Device, RenderSemaphores[i], nullptr);
+                RenderSemaphores[i] = nullptr;
+            }
 
-        if (ReleaseSemaphore != nullptr)
-        {
-            vkDestroySemaphore(Device, ReleaseSemaphore, nullptr);
-            ReleaseSemaphore = nullptr;
+            if (PresentSemaphores[i] != nullptr)
+            {
+                vkDestroySemaphore(Device, PresentSemaphores[i], nullptr);
+                PresentSemaphores[i] = nullptr;
+            }
         }
 
         if (Swapchain != nullptr)
@@ -1242,20 +1205,6 @@ public: // Functions
         {
             vkDestroySurfaceKHR(Instance, Surface, nullptr);
             Surface = nullptr;
-        }
-
-        if (UploadBufferMemory != nullptr)
-        {
-            vkUnmapMemory(Device, UploadBufferMemory);
-            vkFreeMemory(Device, UploadBufferMemory, nullptr);
-            UploadBufferCpuVA = nullptr;
-            UploadBufferMemory = nullptr;
-        }
-
-        if (UploadBuffer != nullptr)
-        {
-            vkDestroyBuffer(Device, UploadBuffer, nullptr);
-            UploadBuffer = nullptr;
         }
 
         if (CommandBuffer != nullptr)
