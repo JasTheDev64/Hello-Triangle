@@ -151,8 +151,8 @@ private: // Functions
         SDL_PropertiesID WindowProperties = SDL_CreateProperties();
         SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_WINDOWPOS_CENTERED);
         SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_Y_NUMBER, SDL_WINDOWPOS_CENTERED);
-        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, 800);
-        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, 600);
+        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, WIDTH);
+        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, HEIGHT);
         SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
         
         Window = SDL_CreateWindowWithProperties(WindowProperties);
