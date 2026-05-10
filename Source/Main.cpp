@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <vector>
 
@@ -90,8 +91,8 @@ private: // Variables
 
     VkPhysicalDeviceMemoryProperties    MemoryProperties {};
 
-    uint32_t                            PrimaryHeapIndex { UINT32_MAX };
-    uint32_t                            UploadHeapIndex { UINT32_MAX };
+    uint32_t                            PrimaryHeap { UINT32_MAX };
+    uint32_t                            UploadHeap { UINT32_MAX };
 
     VkBuffer                            UploadBuffer { nullptr };
     VkDeviceMemory                      UploadBufferMemory { nullptr };
@@ -117,10 +118,10 @@ private: // Variables
     VkRenderPass                        RenderPass { nullptr };
     VkFramebuffer                       Framebuffers[MaxSwapchainImages] {};
 
-    VkSemaphore                         RenderSemaphores[MaxSwapchainImages]{};
-    VkSemaphore                         PresentSemaphores[MaxSwapchainImages]{};
+    VkSemaphore                         RenderSemaphores[MaxSwapchainImages] {};
+    VkSemaphore                         PresentSemaphores[MaxSwapchainImages] {};
 
-    uint32_t                            FrameIndex{ 0 }; // 0 to NumSwapchainImages
+    uint32_t                            FrameIndex { 0 }; // 0 to NumSwapchainImages
 
     VkBuffer                            VertexBuffer { nullptr };
     VkDeviceMemory                      VertexBufferMemory { nullptr };
@@ -427,80 +428,161 @@ private: // Functions
         Assert(vkCreateFence(Device, &FenceInfo, nullptr, &Fence) == VK_SUCCESS, "Failed to create fence");
     }
 
-    void AllocateMemory(const VkMemoryRequirements& rMemoryRequirements, VkMemoryPropertyFlags Flags, uint32_t HeapIndex, VkDeviceMemory& rMemory) const
+    void AllocateMemory(const VkMemoryRequirements& rMemoryRequirements, uint32_t HeapType, VkDeviceMemory& rMemory) const
     {
-        for (uint32_t i = 0; i < MemoryProperties.memoryTypeCount; i++)
+        if ((rMemoryRequirements.memoryTypeBits & (1 << HeapType)) == 0)
         {
-            if ((rMemoryRequirements.memoryTypeBits & (1 << i))
-                && ((MemoryProperties.memoryTypes[i].propertyFlags & Flags) == Flags)
-                && (MemoryProperties.memoryTypes[i].heapIndex == HeapIndex))
-            {
-                VkMemoryAllocateInfo AllocationInfo =
-                {
-                    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                    .pNext = nullptr,
-                    .allocationSize = rMemoryRequirements.size,
-                    .memoryTypeIndex = i
-                };
-
-                Assert(vkAllocateMemory(Device, &AllocationInfo, nullptr, &rMemory) == VK_SUCCESS, "Failed to allocate vertex buffer memory");
-                break;
-            }
+            Assert(false, "Required memory heap not supported for allocation");
         }
 
-        Assert(rMemory != nullptr, "Unable to allocate memory");
-    }
-
-    void InitializeMemoryHeaps(void)
-    {
-        vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &MemoryProperties);
-
-        for (uint32_t i = 0; i < MemoryProperties.memoryTypeCount; i++)
+        VkMemoryAllocateInfo AllocationInfo =
         {
-            uint64_t HeapSize = MemoryProperties.memoryHeaps[MemoryProperties.memoryTypes[i].heapIndex].size;
-
-            if (MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-            {
-                if ((PrimaryHeapIndex == UINT32_MAX) || (HeapSize > MemoryProperties.memoryHeaps[PrimaryHeapIndex].size))
-                {
-                    PrimaryHeapIndex = MemoryProperties.memoryTypes[i].heapIndex;
-                }
-            }
-
-            if (((MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == 0)
-                && (MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
-            {
-                if ((UploadHeapIndex == UINT32_MAX) || (HeapSize > MemoryProperties.memoryHeaps[UploadHeapIndex].size))
-                {
-                    UploadHeapIndex = MemoryProperties.memoryTypes[i].heapIndex;
-                    UploadBufferSize = std::min(ALIGN(HeapSize / 4, MB), static_cast<uint64_t>(16 * MB));
-                }
-            }
-        }
-
-        Assert(PrimaryHeapIndex != UINT32_MAX, "Could not find primary heap");
-        Assert(UploadHeapIndex != UINT32_MAX, "Could not find upload heap");
-
-        VkBufferCreateInfo UploadBufferInfo =
-        {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
             .pNext = nullptr,
-            .flags = 0,
-            .size = UploadBufferSize,
-            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .queueFamilyIndexCount = 0,
-            .pQueueFamilyIndices = nullptr
+            .allocationSize = rMemoryRequirements.size,
+            .memoryTypeIndex = HeapType
         };
 
-        Assert(vkCreateBuffer(Device, &UploadBufferInfo, nullptr, &UploadBuffer) == VK_SUCCESS, "Failed to create upload buffer");
+        Assert(vkAllocateMemory(Device, &AllocationInfo, nullptr, &rMemory) == VK_SUCCESS, "Failed to allocate memory");
+    }
 
-        VkMemoryRequirements UploadBufferRequirements = {};
-        vkGetBufferMemoryRequirements(Device, UploadBuffer, &UploadBufferRequirements);
+    void EnumerateMemoryHeaps(void)
+    {
+        uint32_t GpuHeap = UINT32_MAX;
+        uint32_t SystemHeap = UINT32_MAX;
 
-        AllocateMemory(UploadBufferRequirements, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, UploadHeapIndex, UploadBufferMemory);
-        Assert(vkBindBufferMemory(Device, UploadBuffer, UploadBufferMemory, 0) == VK_SUCCESS, "Failed to bind upload buffer memory");
-        Assert(vkMapMemory(Device, UploadBufferMemory, 0, UploadBufferSize, 0, &UploadBufferCpuVA) == VK_SUCCESS, "Failed to map upload buffer memory");
+        vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &MemoryProperties);
+
+        // Enumerate memory heaps
+        for (uint32_t i = 0; i < MemoryProperties.memoryHeapCount; i++)
+        {
+            uint64_t HeapSize = MemoryProperties.memoryHeaps[i].size;
+            uint32_t HeapProperties = MemoryProperties.memoryHeaps[i].flags;
+
+            // Find the largest GPU VRAM/local memory heap
+            if ((HeapProperties & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0)
+            {
+                if ((GpuHeap == UINT32_MAX) || (HeapSize > MemoryProperties.memoryHeaps[GpuHeap].size))
+                {
+                    GpuHeap = i;
+                }
+            }
+
+            // Find the largest non-local memory heap (System RAM)
+            if ((HeapProperties & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == 0)
+            {
+                if ((SystemHeap == UINT32_MAX) || (HeapSize > MemoryProperties.memoryHeaps[SystemHeap].size))
+                {
+                    SystemHeap = i;
+                }
+            }
+        }
+
+        typedef std::tuple<uint32_t /*local*/, bool /*visible*/, bool /*coherent*/, bool /*cached*/> HeapType;
+        std::map<HeapType, uint32_t> HeapMap;
+
+        // Enumerate memory types
+        for (uint32_t i = 0; i < MemoryProperties.memoryTypeCount; i++)
+        {
+            uint32_t HeapIndex = MemoryProperties.memoryTypes[i].heapIndex;
+            uint32_t MemoryTypeProperties = MemoryProperties.memoryTypes[i].propertyFlags;
+
+            if ((HeapIndex != GpuHeap) || (HeapIndex != SystemHeap))
+                continue;
+
+            HeapType Type(HeapIndex, MemoryTypeProperties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+                MemoryTypeProperties & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                MemoryTypeProperties & VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+
+            std::map<HeapType, uint32_t>::const_iterator it = HeapMap.find(Type);
+            if (it == HeapMap.end())
+            {
+                HeapMap[Type] = i;
+            }
+        }
+
+        uint32_t GpuLocalCpuVisibleHeap = UINT32_MAX; // GPU Local VRAM + CPU Visible Heap
+        uint32_t GpuLocalCpuInvisibleHeap = UINT32_MAX; // GPU Local VRAM + CPU Invisible Heap
+        uint32_t HostHeap = UINT32_MAX; // System RAM
+        uint32_t HostCoherentHeap = UINT32_MAX; // System RAM + Host Coherent Heap
+        uint32_t HostCoherentCachedHeap = UINT32_MAX; // System RAM + Host Coherent/Cached Heap
+
+        std::function<uint32_t(uint32_t,bool,bool,bool)> GetHeapIndex = [HeapMap](uint32_t HeapIndex, bool IsHostVisible, bool IsHostCoherent, bool IsHostCached) -> uint32_t
+        {
+            uint32_t Index = UINT32_MAX;
+            std::map<HeapType, uint32_t>::const_iterator it = HeapMap.find(HeapType(HeapIndex, IsHostVisible, IsHostCoherent, IsHostCached));
+            if (it != HeapMap.end())
+            {
+                Index = it->second;
+            }
+            return Index;
+        };
+
+        GpuLocalCpuVisibleHeap = GetHeapIndex(GpuHeap, true, false, false); // !IsHostCoherent, !IsHostCached
+        if (GpuLocalCpuVisibleHeap == UINT32_MAX) GpuLocalCpuVisibleHeap = GetHeapIndex(GpuHeap, true, true, false); // IsHostCoherent, !IsHostCached
+        if (GpuLocalCpuVisibleHeap == UINT32_MAX) GpuLocalCpuVisibleHeap = GetHeapIndex(GpuHeap, true, true, true); // IsHostCoherent, IsHostCached
+
+        GpuLocalCpuInvisibleHeap = GetHeapIndex(GpuHeap, false, false, false);
+
+        HostHeap = GetHeapIndex(SystemHeap, true, false, false);
+        HostCoherentHeap = GetHeapIndex(SystemHeap, true, true, false);
+        HostCoherentCachedHeap = GetHeapIndex(SystemHeap, true, true, true);
+
+        if (GpuLocalCpuVisibleHeap != UINT32_MAX)
+        {
+            PrimaryHeap = GpuLocalCpuVisibleHeap;
+            UploadHeap = UINT32_MAX;
+        }
+        else if ((GpuLocalCpuInvisibleHeap != UINT32_MAX) && (HostCoherentHeap != UINT32_MAX))
+        {
+            PrimaryHeap = GpuLocalCpuInvisibleHeap;
+            UploadHeap = HostCoherentHeap;
+        }
+        else if ((GpuLocalCpuInvisibleHeap != UINT32_MAX) && (HostCoherentCachedHeap != UINT32_MAX))
+        {
+            PrimaryHeap = GpuLocalCpuInvisibleHeap;
+            UploadHeap = HostCoherentCachedHeap;
+        }
+        else if ((GpuLocalCpuInvisibleHeap != UINT32_MAX) && (HostHeap != UINT32_MAX))
+        {
+            PrimaryHeap = GpuLocalCpuInvisibleHeap;
+            UploadHeap = HostCoherentCachedHeap;
+        }
+        else
+        {
+            PrimaryHeap = HostCoherentHeap;
+            if (PrimaryHeap == UINT32_MAX) PrimaryHeap = HostHeap;
+            if (PrimaryHeap == UINT32_MAX) PrimaryHeap = HostCoherentCachedHeap;
+
+            Assert(PrimaryHeap != UINT32_MAX, "Could not find primary heap");
+        }
+
+        if (UploadHeap != UINT32_MAX)
+        {
+            uint64_t HeapSize = MemoryProperties.memoryHeaps[MemoryProperties.memoryTypes[UploadHeap].heapIndex].size;
+            UploadBufferSize = std::min(ALIGN(HeapSize / 4, MB), static_cast<uint64_t>(16 * MB));
+
+            VkBufferCreateInfo UploadBufferInfo =
+            {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = 0,
+                .size = UploadBufferSize,
+                .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                .queueFamilyIndexCount = 0,
+                .pQueueFamilyIndices = nullptr
+            };
+
+            Assert(vkCreateBuffer(Device, &UploadBufferInfo, nullptr, &UploadBuffer) == VK_SUCCESS, "Failed to create upload buffer");
+
+            VkMemoryRequirements UploadBufferRequirements = {};
+            vkGetBufferMemoryRequirements(Device, UploadBuffer, &UploadBufferRequirements);
+
+            AllocateMemory(UploadBufferRequirements, UploadHeap, UploadBufferMemory);
+            Assert(vkBindBufferMemory(Device, UploadBuffer, UploadBufferMemory, 0) == VK_SUCCESS, "Failed to bind upload buffer memory");
+            Assert(vkMapMemory(Device, UploadBufferMemory, 0, UploadBufferSize, 0, &UploadBufferCpuVA) == VK_SUCCESS, "Failed to map upload buffer memory");
+        }
     }
 
     void CreateSwapchain(void)
@@ -704,7 +786,7 @@ private: // Functions
         VkMemoryRequirements BufferRequirements = {};
         vkGetBufferMemoryRequirements(Device, VertexBuffer, &BufferRequirements);
 
-        AllocateMemory(BufferRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, PrimaryHeapIndex, VertexBufferMemory);
+        AllocateMemory(BufferRequirements, PrimaryHeap, VertexBufferMemory);
         Assert(vkBindBufferMemory(Device, VertexBuffer, VertexBufferMemory, 0) == VK_SUCCESS, "Failed to bind vertex buffer memory");
 
         VkMappedMemoryRange FlushRange =
@@ -1169,7 +1251,7 @@ public: // Functions
         EnumerateGPUs();
         CreateVulkanDevice();
         CreateGraphicsQueue();
-        InitializeMemoryHeaps();
+        EnumerateMemoryHeaps();
 
         Assert(SDL_Vulkan_CreateSurface(Window, Instance, nullptr, &Surface) == VK_TRUE, "Failed to create surface");
         CreateSwapchain();
