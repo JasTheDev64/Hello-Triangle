@@ -7,8 +7,8 @@
 #include <map>
 #include <vector>
 
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_vulkan.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
 #include <vulkan/vulkan.h>
 
@@ -117,8 +117,10 @@ private: // Variables
     VkRenderPass                        RenderPass { nullptr };
     VkFramebuffer                       Framebuffers[MaxSwapchainImages] {};
 
-    VkSemaphore                         AcquireSemaphore { nullptr };
-    VkSemaphore                         ReleaseSemaphore { nullptr };
+    VkSemaphore                         RenderSemaphores[MaxSwapchainImages]{};
+    VkSemaphore                         PresentSemaphores[MaxSwapchainImages]{};
+
+    uint32_t                            FrameIndex{ 0 }; // 0 to NumSwapchainImages
 
     VkBuffer                            VertexBuffer { nullptr };
     VkDeviceMemory                      VertexBufferMemory { nullptr };
@@ -143,10 +145,20 @@ private: // Functions
 
     void CreateWindow(void)
     {
-        Assert(SDL_Init(SDL_INIT_EVERYTHING) == 0, "Could not initialize SDL");
-        Assert(SDL_Vulkan_LoadLibrary(nullptr) == 0, "Could not load the vulkan library");
+        Assert(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS), "Could not initialize SDL");
+        Assert(SDL_Vulkan_LoadLibrary(nullptr), "Could not load the vulkan library");
 
-        Window = SDL_CreateWindow(APP_NAME, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN);
+        SDL_PropertiesID WindowProperties = SDL_CreateProperties();
+        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_WINDOWPOS_CENTERED);
+        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_Y_NUMBER, SDL_WINDOWPOS_CENTERED);
+        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, 800);
+        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, 600);
+        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
+        
+        Window = SDL_CreateWindowWithProperties(WindowProperties);
+        
+        SDL_DestroyProperties(WindowProperties);
+
         Assert(Window != nullptr, "Could not create SDL window");
     }
 
@@ -176,11 +188,11 @@ private: // Functions
             }
         }
 
-        Assert(SDL_Vulkan_GetInstanceExtensions(Window, &ExtCount, nullptr) == SDL_TRUE, "Could not get number of required SDL extensions");
+        char const* const* RequiredSDLExtensions = SDL_Vulkan_GetInstanceExtensions(&ExtCount);
+        Assert(RequiredSDLExtensions != nullptr, "Could not get number of required SDL extensions");
 
         std::vector<const char*> RequiredLayers;
-        std::vector<const char*> RequiredExtensions(ExtCount);
-        Assert(SDL_Vulkan_GetInstanceExtensions(Window, &ExtCount, RequiredExtensions.data()) == SDL_TRUE, "Could not get required SDL extensions");
+        std::vector<const char*> RequiredExtensions(RequiredSDLExtensions, RequiredSDLExtensions + ExtCount); // Create RequiredExtensions vector with copy of the RequiredSDLExtensions array
 
 #ifdef DEBUG // Only add the validation layer/extension if this is a debug build
         RequiredLayers.push_back("VK_LAYER_KHRONOS_validation");
@@ -555,8 +567,11 @@ private: // Functions
             .flags = 0
         };
 
-        Assert(vkCreateSemaphore(Device, &SemaphoreInfo, nullptr, &AcquireSemaphore) == VK_SUCCESS, "Failed to create semaphore");
-        Assert(vkCreateSemaphore(Device, &SemaphoreInfo, nullptr, &ReleaseSemaphore) == VK_SUCCESS, "Failed to create semaphore");
+        for (uint32_t i = 0; i < NumSwapchainImages; i++)
+        {
+            Assert(vkCreateSemaphore(Device, &SemaphoreInfo, nullptr, &RenderSemaphores[i]) == VK_SUCCESS, "Failed to create render semaphore %u", i);
+            Assert(vkCreateSemaphore(Device, &SemaphoreInfo, nullptr, &PresentSemaphores[i]) == VK_SUCCESS, "Failed to create present semaphore %u", i);
+        }
     }
 
     void CreateRenderPass(void)
@@ -689,7 +704,7 @@ private: // Functions
         VkMemoryRequirements BufferRequirements = {};
         vkGetBufferMemoryRequirements(Device, VertexBuffer, &BufferRequirements);
 
-        AllocateMemory(BufferRequirements, PrimaryHeapIndex, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VertexBufferMemory);
+        AllocateMemory(BufferRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, PrimaryHeapIndex, VertexBufferMemory);
         Assert(vkBindBufferMemory(Device, VertexBuffer, VertexBufferMemory, 0) == VK_SUCCESS, "Failed to bind vertex buffer memory");
 
         VkMappedMemoryRange FlushRange =
@@ -1030,14 +1045,14 @@ private: // Functions
         {
             switch (event.type)
             {
-                case SDL_QUIT:
+                case SDL_EVENT_QUIT:
                 {
                     Running = false; // The main loop will exit once this becomes false
                     break;
                 }
-                case SDL_KEYDOWN:
+                case SDL_EVENT_KEY_DOWN:
                 {
-                    switch (event.key.keysym.scancode)
+                    switch (event.key.scancode)
                     {
                         case SDL_SCANCODE_ESCAPE:
                             Running = false; // The main loop will exit once this becomes false
@@ -1056,7 +1071,7 @@ private: // Functions
     void Render(void)
     {
         uint32_t SwapchainIndex = 0;
-        Assert(vkAcquireNextImageKHR(Device, Swapchain, UINT64_MAX, AcquireSemaphore, nullptr, &SwapchainIndex) == VK_SUCCESS, "Could not get next surface image");
+        Assert(vkAcquireNextImageKHR(Device, Swapchain, 1 * NANOSECONDS_PER_SECOND, RenderSemaphores[FrameIndex], nullptr, &SwapchainIndex) == VK_SUCCESS, "Could not get next surface image");
 
         // Color buffer clear color
         VkClearValue ClearColor;
@@ -1117,12 +1132,12 @@ private: // Functions
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .pNext = nullptr,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &AcquireSemaphore,
+            .pWaitSemaphores = &RenderSemaphores[FrameIndex],
             .pWaitDstStageMask = WaitDstStageMasks,
             .commandBufferCount = 1,
             .pCommandBuffers = &CommandBuffer,
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &ReleaseSemaphore
+            .pSignalSemaphores = &PresentSemaphores[SwapchainIndex]
         };
 
         VkPresentInfoKHR PresentInfo =
@@ -1130,7 +1145,7 @@ private: // Functions
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .pNext = nullptr,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &ReleaseSemaphore,
+            .pWaitSemaphores = &PresentSemaphores[SwapchainIndex],
             .swapchainCount = 1,
             .pSwapchains = &Swapchain,
             .pImageIndices = &SwapchainIndex,
@@ -1142,6 +1157,8 @@ private: // Functions
         
         Assert(vkWaitForFences(Device, 1, &Fence, VK_TRUE, 1 * NANOSECONDS_PER_SECOND) == VK_SUCCESS, "Fence timeout");
         Assert(vkResetFences(Device, 1, &Fence) == VK_SUCCESS, "Could not reset fence");
+
+        FrameIndex = (FrameIndex + 1) % NumSwapchainImages;
     }
 
 public: // Functions
@@ -1153,8 +1170,8 @@ public: // Functions
         CreateVulkanDevice();
         CreateGraphicsQueue();
         InitializeMemoryHeaps();
-        
-        Assert(SDL_Vulkan_CreateSurface(Window, Instance, &Surface) == VK_TRUE, "Failed to create surface");
+
+        Assert(SDL_Vulkan_CreateSurface(Window, Instance, nullptr, &Surface) == VK_TRUE, "Failed to create surface");
         CreateSwapchain();
         CreateRenderPass();
         CreateFramebuffers();
@@ -1215,16 +1232,19 @@ public: // Functions
             RenderPass = nullptr;
         }
 
-        if (AcquireSemaphore != nullptr)
+        for (uint32_t i = 0; i < MaxSwapchainImages; i++)
         {
-            vkDestroySemaphore(Device, AcquireSemaphore, nullptr);
-            AcquireSemaphore = nullptr;
-        }
+            if (RenderSemaphores[i] != nullptr)
+            {
+                vkDestroySemaphore(Device, RenderSemaphores[i], nullptr);
+                RenderSemaphores[i] = nullptr;
+            }
 
-        if (ReleaseSemaphore != nullptr)
-        {
-            vkDestroySemaphore(Device, ReleaseSemaphore, nullptr);
-            ReleaseSemaphore = nullptr;
+            if (PresentSemaphores[i] != nullptr)
+            {
+                vkDestroySemaphore(Device, PresentSemaphores[i], nullptr);
+                PresentSemaphores[i] = nullptr;
+            }
         }
 
         if (Swapchain != nullptr)
