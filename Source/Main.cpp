@@ -487,7 +487,7 @@ private: // Functions
             uint32_t HeapIndex = MemoryProperties.memoryTypes[i].heapIndex;
             uint32_t MemoryTypeProperties = MemoryProperties.memoryTypes[i].propertyFlags;
 
-            if ((HeapIndex != GpuHeap) || (HeapIndex != SystemHeap))
+            if ((HeapIndex != GpuHeap) && (HeapIndex != SystemHeap))
                 continue;
 
             HeapType Type(HeapIndex, MemoryTypeProperties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
@@ -507,7 +507,7 @@ private: // Functions
         uint32_t HostCoherentHeap = UINT32_MAX; // System RAM + Host Coherent Heap
         uint32_t HostCoherentCachedHeap = UINT32_MAX; // System RAM + Host Coherent/Cached Heap
 
-        std::function<uint32_t(uint32_t,bool,bool,bool)> GetHeapIndex = [HeapMap](uint32_t HeapIndex, bool IsHostVisible, bool IsHostCoherent, bool IsHostCached) -> uint32_t
+        std::function<uint32_t(uint32_t,bool,bool,bool)> FindHeap = [HeapMap](uint32_t HeapIndex, bool IsHostVisible, bool IsHostCoherent, bool IsHostCached) -> uint32_t
         {
             uint32_t Index = UINT32_MAX;
             std::map<HeapType, uint32_t>::const_iterator it = HeapMap.find(HeapType(HeapIndex, IsHostVisible, IsHostCoherent, IsHostCached));
@@ -518,15 +518,15 @@ private: // Functions
             return Index;
         };
 
-        GpuLocalCpuVisibleHeap = GetHeapIndex(GpuHeap, true, false, false); // !IsHostCoherent, !IsHostCached
-        if (GpuLocalCpuVisibleHeap == UINT32_MAX) GpuLocalCpuVisibleHeap = GetHeapIndex(GpuHeap, true, true, false); // IsHostCoherent, !IsHostCached
-        if (GpuLocalCpuVisibleHeap == UINT32_MAX) GpuLocalCpuVisibleHeap = GetHeapIndex(GpuHeap, true, true, true); // IsHostCoherent, IsHostCached
+        GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, false, false); // !IsHostCoherent, !IsHostCached
+        if (GpuLocalCpuVisibleHeap == UINT32_MAX) GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, true, false); // IsHostCoherent, !IsHostCached
+        if (GpuLocalCpuVisibleHeap == UINT32_MAX) GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, true, true); // IsHostCoherent, IsHostCached
 
-        GpuLocalCpuInvisibleHeap = GetHeapIndex(GpuHeap, false, false, false);
+        GpuLocalCpuInvisibleHeap = FindHeap(GpuHeap, false, false, false);
 
-        HostHeap = GetHeapIndex(SystemHeap, true, false, false);
-        HostCoherentHeap = GetHeapIndex(SystemHeap, true, true, false);
-        HostCoherentCachedHeap = GetHeapIndex(SystemHeap, true, true, true);
+        HostHeap = FindHeap(SystemHeap, true, false, false);
+        HostCoherentHeap = FindHeap(SystemHeap, true, true, false);
+        HostCoherentCachedHeap = FindHeap(SystemHeap, true, true, true);
 
         if (GpuLocalCpuVisibleHeap != UINT32_MAX)
         {
