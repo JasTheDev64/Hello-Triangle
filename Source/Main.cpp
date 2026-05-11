@@ -518,9 +518,8 @@ private: // Functions
             return Index;
         };
 
-        GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, false, false); // !IsHostCoherent, !IsHostCached
-        if (GpuLocalCpuVisibleHeap == UINT32_MAX) GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, true, false); // IsHostCoherent, !IsHostCached
-        if (GpuLocalCpuVisibleHeap == UINT32_MAX) GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, true, true); // IsHostCoherent, IsHostCached
+        GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, true, false); // IsHostCoherent, !IsHostCached
+        if (GpuLocalCpuVisibleHeap == UINT32_MAX) GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, false, false); // !IsHostCoherent, !IsHostCached
 
         GpuLocalCpuInvisibleHeap = FindHeap(GpuHeap, false, false, false);
 
