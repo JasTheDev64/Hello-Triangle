@@ -448,112 +448,79 @@ private: // Functions
 
     void EnumerateMemoryHeaps(void)
     {
-        uint32_t GpuHeap = UINT32_MAX;
-        uint32_t SystemHeap = UINT32_MAX;
-
         vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &MemoryProperties);
 
-        // Enumerate memory heaps
-        for (uint32_t i = 0; i < MemoryProperties.memoryHeapCount; i++)
+        // Helper lambda to scan available memory types
+        std::function<bool(uint32_t, uint32_t&)> FindHeap = [&](uint32_t Flags, uint32_t& MemoryType) -> bool
         {
-            uint64_t HeapSize = MemoryProperties.memoryHeaps[i].size;
-            uint32_t HeapProperties = MemoryProperties.memoryHeaps[i].flags;
-
-            // Find the largest GPU VRAM/local memory heap
-            if ((HeapProperties & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0)
+            uint32_t Mask = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+            uint64_t MaxSize = 0;
+            MemoryType = UINT32_MAX;
+            for (uint32_t i = 0; i < MemoryProperties.memoryTypeCount; i++)
             {
-                if ((GpuHeap == UINT32_MAX) || (HeapSize > MemoryProperties.memoryHeaps[GpuHeap].size))
+                uint32_t HeapIndex = MemoryProperties.memoryTypes[i].heapIndex;
+                uint64_t HeapSize = MemoryProperties.memoryHeaps[HeapIndex].size;
+                uint32_t HeapFlags = MemoryProperties.memoryTypes[i].propertyFlags;
+                if ((HeapFlags & Mask) == Flags && HeapSize > MaxSize)
                 {
-                    GpuHeap = i;
+                    MemoryType = i;
+                    MaxSize = HeapSize;
                 }
             }
-
-            // Find the largest non-local memory heap (System RAM)
-            if ((HeapProperties & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == 0)
-            {
-                if ((SystemHeap == UINT32_MAX) || (HeapSize > MemoryProperties.memoryHeaps[SystemHeap].size))
-                {
-                    SystemHeap = i;
-                }
-            }
-        }
-
-        typedef std::tuple<uint32_t /*local*/, bool /*visible*/, bool /*coherent*/, bool /*cached*/> HeapType;
-        std::map<HeapType, uint32_t> HeapMap;
-
-        // Enumerate memory types
-        for (uint32_t i = 0; i < MemoryProperties.memoryTypeCount; i++)
-        {
-            uint32_t HeapIndex = MemoryProperties.memoryTypes[i].heapIndex;
-            uint32_t MemoryTypeProperties = MemoryProperties.memoryTypes[i].propertyFlags;
-
-            if ((HeapIndex != GpuHeap) && (HeapIndex != SystemHeap))
-                continue;
-
-            HeapType Type(HeapIndex, MemoryTypeProperties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-                MemoryTypeProperties & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                MemoryTypeProperties & VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-
-            std::map<HeapType, uint32_t>::const_iterator it = HeapMap.find(Type);
-            if (it == HeapMap.end())
-            {
-                HeapMap[Type] = i;
-            }
-        }
-
-        std::function<uint32_t(uint32_t,bool,bool,bool)> FindHeap = [HeapMap](uint32_t HeapIndex, bool IsHostVisible, bool IsHostCoherent, bool IsHostCached) -> uint32_t
-        {
-            uint32_t Index = UINT32_MAX;
-            std::map<HeapType, uint32_t>::const_iterator it = HeapMap.find(HeapType(HeapIndex, IsHostVisible, IsHostCoherent, IsHostCached));
-            if (it != HeapMap.end())
-            {
-                Index = it->second;
-            }
-            return Index;
+            return (MemoryType != UINT32_MAX);
         };
 
         uint32_t GpuLocalCpuVisibleHeap = UINT32_MAX; // GPU Local VRAM + CPU Visible Heap
         uint32_t GpuLocalCpuInvisibleHeap = UINT32_MAX; // GPU Local VRAM + CPU Invisible Heap
-        uint32_t HostHeap = UINT32_MAX; // System RAM
-        uint32_t HostCoherentHeap = UINT32_MAX; // System RAM + Host Coherent Heap
-        uint32_t HostCoherentCachedHeap = UINT32_MAX; // System RAM + Host Coherent/Cached Heap
 
-        GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, true, false); // GPU VRAM, HostVisible, HostCoherent, !HostCached
-        if (GpuLocalCpuVisibleHeap == UINT32_MAX) GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, false, false); // GPU VRAM, HostVisible, !HostCoherent, !HostCached
+        // Try to find GpuLocalCpuVisibleHeap
+        if (FindHeap(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, GpuLocalCpuVisibleHeap)) {} // GPU Local VRAM, HostVisible, HostCoherent, !HostCached
+        else if (FindHeap(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, GpuLocalCpuVisibleHeap)) {} // GPU Local VRAM, HostVisible, !HostCoherent, !HostCached
 
-        GpuLocalCpuInvisibleHeap = FindHeap(GpuHeap, false, false, false);
+        // Try to find GpuLocalCpuInvisibleHeap
+        if (FindHeap(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, GpuLocalCpuInvisibleHeap)) {} // GPU Local VRAM, !HostVisible, !HostCoherent, !HostCached
 
-        HostHeap = FindHeap(SystemHeap, true, false, false);
-        HostCoherentHeap = FindHeap(SystemHeap, true, true, false);
-        HostCoherentCachedHeap = FindHeap(SystemHeap, true, true, true);
-
-        if (GpuLocalCpuVisibleHeap != UINT32_MAX)
+        if (GpuLocalCpuVisibleHeap != UINT32_MAX && GpuLocalCpuInvisibleHeap != UINT32_MAX
+            && MemoryProperties.memoryTypes[GpuLocalCpuVisibleHeap].heapIndex == MemoryProperties.memoryTypes[GpuLocalCpuInvisibleHeap].heapIndex)
         {
+            // If both the GPU Local VRAM + CPU visible and CPU invisible memory types are on the same memory heap, we can just use the CPU visible one
+            // This happens when resizable bar is enabled
             PrimaryHeap = GpuLocalCpuVisibleHeap;
-            UploadHeap = UINT32_MAX;
+            UploadHeap = UINT32_MAX; // Upload heap is not needed, we will write our data directly to the GPU VRAM
         }
-        else if ((GpuLocalCpuInvisibleHeap != UINT32_MAX) && (HostCoherentHeap != UINT32_MAX))
+        else if (GpuLocalCpuVisibleHeap != UINT32_MAX && GpuLocalCpuInvisibleHeap == UINT32_MAX)
         {
+            // If there is no GPU Local VRAM + CPU invisible, but there is a GPU Local VRAM + CPU visible heap, we can use that
+            // This can happen on iGPUs
+            PrimaryHeap = GpuLocalCpuVisibleHeap;
+            UploadHeap = UINT32_MAX; // Upload heap is not needed, we will write our data directly to the GPU VRAM
+        }
+        else if (GpuLocalCpuInvisibleHeap != UINT32_MAX)
+        {
+            // Otherwise we try to default to the primary heap being the GPU Local VRAM + CPU invisible heap
+            // And the upload heap being the GPU Local VRAM + CPU visible heap
             PrimaryHeap = GpuLocalCpuInvisibleHeap;
-            UploadHeap = HostCoherentHeap;
-        }
-        else if ((GpuLocalCpuInvisibleHeap != UINT32_MAX) && (HostCoherentCachedHeap != UINT32_MAX))
-        {
-            PrimaryHeap = GpuLocalCpuInvisibleHeap;
-            UploadHeap = HostCoherentCachedHeap;
-        }
-        else if ((GpuLocalCpuInvisibleHeap != UINT32_MAX) && (HostHeap != UINT32_MAX))
-        {
-            PrimaryHeap = GpuLocalCpuInvisibleHeap;
-            UploadHeap = HostCoherentCachedHeap;
-        }
-        else
-        {
-            PrimaryHeap = HostCoherentHeap;
-            if (PrimaryHeap == UINT32_MAX) PrimaryHeap = HostHeap;
-            if (PrimaryHeap == UINT32_MAX) PrimaryHeap = HostCoherentCachedHeap;
 
-            Assert(PrimaryHeap != UINT32_MAX, "Could not find primary heap");
+            if (GpuLocalCpuVisibleHeap != UINT32_MAX) UploadHeap = GpuLocalCpuVisibleHeap;
+            else if (FindHeap(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, UploadHeap)) {}
+            else if (FindHeap(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, UploadHeap)) {}
+            else
+            {
+                // Cannot find a suitable upload heap
+                PrimaryHeap = UINT32_MAX;
+                UploadHeap = UINT32_MAX;
+            }
+        }
+
+        if (PrimaryHeap == UINT32_MAX)
+        {
+            // If we couldn't find suitable device local memory, we fall back to system memory for the primary heap
+            if (FindHeap(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, PrimaryHeap)) {}
+            else if (FindHeap(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, PrimaryHeap)) {}
+            else
+            {
+                Assert(false, "Unable to find primary heap");
+            }
         }
 
         if (UploadHeap != UINT32_MAX)
