@@ -501,12 +501,6 @@ private: // Functions
             }
         }
 
-        uint32_t GpuLocalCpuVisibleHeap = UINT32_MAX; // GPU Local VRAM + CPU Visible Heap
-        uint32_t GpuLocalCpuInvisibleHeap = UINT32_MAX; // GPU Local VRAM + CPU Invisible Heap
-        uint32_t HostHeap = UINT32_MAX; // System RAM
-        uint32_t HostCoherentHeap = UINT32_MAX; // System RAM + Host Coherent Heap
-        uint32_t HostCoherentCachedHeap = UINT32_MAX; // System RAM + Host Coherent/Cached Heap
-
         std::function<uint32_t(uint32_t,bool,bool,bool)> FindHeap = [HeapMap](uint32_t HeapIndex, bool IsHostVisible, bool IsHostCoherent, bool IsHostCached) -> uint32_t
         {
             uint32_t Index = UINT32_MAX;
@@ -518,8 +512,14 @@ private: // Functions
             return Index;
         };
 
-        GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, true, false); // IsHostCoherent, !IsHostCached
-        if (GpuLocalCpuVisibleHeap == UINT32_MAX) GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, false, false); // !IsHostCoherent, !IsHostCached
+        uint32_t GpuLocalCpuVisibleHeap = UINT32_MAX; // GPU Local VRAM + CPU Visible Heap
+        uint32_t GpuLocalCpuInvisibleHeap = UINT32_MAX; // GPU Local VRAM + CPU Invisible Heap
+        uint32_t HostHeap = UINT32_MAX; // System RAM
+        uint32_t HostCoherentHeap = UINT32_MAX; // System RAM + Host Coherent Heap
+        uint32_t HostCoherentCachedHeap = UINT32_MAX; // System RAM + Host Coherent/Cached Heap
+
+        GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, true, false); // GPU VRAM, HostVisible, HostCoherent, !HostCached
+        if (GpuLocalCpuVisibleHeap == UINT32_MAX) GpuLocalCpuVisibleHeap = FindHeap(GpuHeap, true, false, false); // GPU VRAM, HostVisible, !HostCoherent, !HostCached
 
         GpuLocalCpuInvisibleHeap = FindHeap(GpuHeap, false, false, false);
 
