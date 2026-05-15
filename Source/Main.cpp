@@ -490,7 +490,7 @@ private: // Functions
         }
         else if (GpuLocalCpuVisibleHeap != UINT32_MAX && GpuLocalCpuInvisibleHeap == UINT32_MAX)
         {
-            // If there is no GPU Local VRAM + CPU invisible, but there is a GPU Local VRAM + CPU visible heap, we can use that
+            // If there is no GPU Local VRAM + CPU invisible heap, but there is a GPU Local VRAM + CPU visible heap, we can use that
             // This can happen on iGPUs
             PrimaryHeap = GpuLocalCpuVisibleHeap;
             UploadHeap = UINT32_MAX; // Upload heap is not needed, we will write our data directly to the GPU VRAM
