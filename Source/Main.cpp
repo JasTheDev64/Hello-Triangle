@@ -760,20 +760,22 @@ private: // Functions
         AllocateMemory(BufferRequirements, PrimaryHeap, VertexBufferMemory);
         Assert(vkBindBufferMemory(Device, VertexBuffer, VertexBufferMemory, 0) == VK_SUCCESS, "Failed to bind vertex buffer memory");
 
-        VkMappedMemoryRange FlushRange =
-        {
-            .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-            .pNext = nullptr,
-            .memory = UploadBufferMemory,
-            .offset = 0,
-            .size = VK_WHOLE_SIZE
-        };
-
         if (UploadBufferCpuVA)
         {
+            // Copy the vertex data to the upload buffer
+            VkMappedMemoryRange FlushRange =
+            {
+                .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+                .pNext = nullptr,
+                .memory = UploadBufferMemory,
+                .offset = 0,
+                .size = VK_WHOLE_SIZE
+            };
+
             memcpy(reinterpret_cast<uint8_t*>(UploadBufferCpuVA), TriangleVertices, sizeof(TriangleVertices));
             Assert(vkFlushMappedMemoryRanges(Device, 1, &FlushRange) == VK_SUCCESS, "Failed to flush vertex buffer memory");
 
+            // Generate the command buffer to copy the vertex data from the upload buffer to the vertex buffer
             VkCommandBufferBeginInfo CommandBufferBeginInfo =
             {
                 .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -793,6 +795,7 @@ private: // Functions
             vkCmdCopyBuffer(CommandBuffer, UploadBuffer, VertexBuffer, 1, &CopyCmd);
             Assert(vkEndCommandBuffer(CommandBuffer) == VK_SUCCESS, "Failed to finalize command buffer");
 
+            // Submit the copy command buffer to the graphics queue
             VkSubmitInfo SubmitInfo =
             {
                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -812,12 +815,24 @@ private: // Functions
         }
         else
         {
+            // Map the vertex buffer memory so we can copy our vertex data directly to it
             void* VertexBufferCpuVA = nullptr;
             Assert(vkMapMemory(Device, VertexBufferMemory, 0, BufferRequirements.size, 0, &VertexBufferCpuVA) == VK_SUCCESS, "Failed to map vertex buffer memory");
 
-            memcpy(reinterpret_cast<uint8_t*>(UploadBufferCpuVA), TriangleVertices, sizeof(TriangleVertices));
+            VkMappedMemoryRange FlushRange =
+            {
+                .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+                .pNext = nullptr,
+                .memory = VertexBufferMemory,
+                .offset = 0,
+                .size = VK_WHOLE_SIZE
+            };
+
+            // Copy the vertex data to the CPU mapped memory
+            memcpy(reinterpret_cast<uint8_t*>(VertexBufferCpuVA), TriangleVertices, sizeof(TriangleVertices));
             Assert(vkFlushMappedMemoryRanges(Device, 1, &FlushRange) == VK_SUCCESS, "Failed to flush vertex buffer memory");
 
+            // Unmap the vertex buffer - we don't need it to be CPU accessible anymore
             vkUnmapMemory(Device, VertexBufferMemory);
         }
     }
