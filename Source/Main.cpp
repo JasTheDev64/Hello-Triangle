@@ -1191,7 +1191,7 @@ private: // Functions
             .commandBufferCount = 1,
             .pCommandBuffers = &CommandBuffer,
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &PresentSemaphores[SwapchainIndex]
+            .pSignalSemaphores = &PresentSemaphores[FrameIndex]
         };
 
         VkPresentInfoKHR PresentInfo =
@@ -1199,7 +1199,7 @@ private: // Functions
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .pNext = nullptr,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &PresentSemaphores[SwapchainIndex],
+            .pWaitSemaphores = &PresentSemaphores[FrameIndex],
             .swapchainCount = 1,
             .pSwapchains = &Swapchain,
             .pImageIndices = &SwapchainIndex,
