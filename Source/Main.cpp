@@ -256,36 +256,53 @@ private: // Functions
 
         struct PhysicalDeviceInfo
         {
-            VkPhysicalDevice Handle;
-            uint32_t         OriginalIndex;
-            uint32_t         PreferenceIndex;
-            uint32_t         GraphicsQueueGroup;
-            uint32_t         NumGraphicsQueues;
-            uint64_t         LocalHeapSize;
+            VkPhysicalDevice Handle = nullptr;
+            uint32_t         OriginalIndex = 0;
+            uint32_t         PreferenceIndex = 0;
+            uint32_t         GraphicsQueueGroup = UINT32_MAX;
+            uint32_t         NumGraphicsQueues = 0;
+            uint64_t         LocalHeapSize = 0;
+
+            // Boolean operator to check if a device is valid
+            operator bool() const
+            {
+                return (Handle != nullptr)
+                    && (PreferenceIndex > 0)
+                    && (GraphicsQueueGroup != UINT32_MAX);
+            }
+
+            // Comparison operator to compare two devices
+            // Checks if this device has a greater preference, graphics queue count, or local heap size than the other device
+            bool operator > (const PhysicalDeviceInfo& rOtherDevice)
+            {
+                #define COMPARE(a, b) { if ((a) > (b)) { return true; } else if ((a) < (b)) { return false; } }
+                COMPARE(this->PreferenceIndex, rOtherDevice.PreferenceIndex);
+                COMPARE(this->NumGraphicsQueues, rOtherDevice.NumGraphicsQueues);
+                COMPARE(this->LocalHeapSize, rOtherDevice.LocalHeapSize);
+                return false;
+                #undef COMPARE
+            }
         };
 
         uint32_t DeviceCount = 0;
-        uint32_t QueueCount  = 0;
-
         Assert(vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr) == VK_SUCCESS, "Could not get number of physical devices");
 
         std::vector<VkPhysicalDevice> DeviceHandles(DeviceCount);
         Assert(vkEnumeratePhysicalDevices(Instance, &DeviceCount, DeviceHandles.data()) == VK_SUCCESS, "Could not get physical devices");
 
-        std::vector<PhysicalDeviceInfo> PhysicalDevices;
+        PhysicalDeviceInfo SelectedDevice = {};
 
         for (uint32_t i = 0; i < DeviceHandles.size(); i++)
         {
-            VkPhysicalDeviceFeatures DeviceFeatures {};
+            PhysicalDeviceInfo DeviceInfo = { DeviceHandles[i], i,};
+
             VkPhysicalDeviceProperties DeviceProperties {};
             VkPhysicalDeviceMemoryProperties MemoryProperties {};
 
-            PhysicalDeviceInfo DeviceInfo { DeviceHandles[i], i, 0, UINT32_MAX, 0, 0 };
-
-            vkGetPhysicalDeviceFeatures(DeviceHandles[i], &DeviceFeatures);
             vkGetPhysicalDeviceProperties(DeviceHandles[i], &DeviceProperties);
             vkGetPhysicalDeviceMemoryProperties(DeviceHandles[i], &MemoryProperties);
 
+            uint32_t QueueCount = 0;
             vkGetPhysicalDeviceQueueFamilyProperties(DeviceHandles[i], &QueueCount, nullptr);
 
             std::vector<VkQueueFamilyProperties> QueueGroups(QueueCount);
@@ -314,25 +331,16 @@ private: // Functions
                 }
             }
 
-            PhysicalDevices.push_back(DeviceInfo);
+            if (DeviceInfo)
+            {
+                SelectedDevice = (DeviceInfo > SelectedDevice) ? DeviceInfo : SelectedDevice;
+            }
         }
 
-        Assert(PhysicalDevices.size() > 0, "Could not find a supported GPU");
+        Assert(SelectedDevice, "Could not find a supported GPU");
 
-#define COMPARE(a, b) { if ((a) > (b)) { return true; } else if ((a) < (b)) { return false; } }
-        std::sort(PhysicalDevices.begin(), PhysicalDevices.end(),
-            [](const PhysicalDeviceInfo& lhs, const PhysicalDeviceInfo& rhs) -> bool
-            {
-                COMPARE(lhs.PreferenceIndex, rhs.PreferenceIndex);
-                COMPARE(lhs.NumGraphicsQueues, rhs.NumGraphicsQueues);
-                COMPARE(lhs.LocalHeapSize, rhs.LocalHeapSize);
-                return false;
-            }
-        );
-#undef COMPARE
-
-        PhysicalDevice = PhysicalDevices[0].Handle;
-        GraphicsQueueGroup = PhysicalDevices[0].GraphicsQueueGroup;
+        PhysicalDevice = SelectedDevice.Handle;
+        GraphicsQueueGroup = SelectedDevice.GraphicsQueueGroup;
     }
 
     void CreateVulkanDevice(void)
