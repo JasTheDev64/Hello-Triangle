@@ -4,11 +4,12 @@
 #include <cstdint>
 
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <vector>
 
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_vulkan.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
 #include <vulkan/vulkan.h>
 
@@ -90,8 +91,8 @@ private: // Variables
 
     VkPhysicalDeviceMemoryProperties    MemoryProperties {};
 
-    uint32_t                            PrimaryHeapIndex { UINT32_MAX };
-    uint32_t                            UploadHeapIndex { UINT32_MAX };
+    uint32_t                            PrimaryHeap { UINT32_MAX };
+    uint32_t                            UploadHeap { UINT32_MAX };
 
     VkBuffer                            UploadBuffer { nullptr };
     VkDeviceMemory                      UploadBufferMemory { nullptr };
@@ -117,8 +118,10 @@ private: // Variables
     VkRenderPass                        RenderPass { nullptr };
     VkFramebuffer                       Framebuffers[MaxSwapchainImages] {};
 
-    VkSemaphore                         AcquireSemaphore { nullptr };
-    VkSemaphore                         ReleaseSemaphore { nullptr };
+    VkSemaphore                         RenderSemaphores[MaxSwapchainImages] {};
+    VkSemaphore                         PresentSemaphores[MaxSwapchainImages] {};
+
+    uint32_t                            FrameIndex { 0 }; // 0 to NumSwapchainImages
 
     VkBuffer                            VertexBuffer { nullptr };
     VkDeviceMemory                      VertexBufferMemory { nullptr };
@@ -143,10 +146,20 @@ private: // Functions
 
     void CreateWindow(void)
     {
-        Assert(SDL_Init(SDL_INIT_EVERYTHING) == 0, "Could not initialize SDL");
-        Assert(SDL_Vulkan_LoadLibrary(nullptr) == 0, "Could not load the vulkan library");
+        Assert(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS), "Could not initialize SDL");
+        Assert(SDL_Vulkan_LoadLibrary(nullptr), "Could not load the vulkan library");
 
-        Window = SDL_CreateWindow(APP_NAME, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN);
+        SDL_PropertiesID WindowProperties = SDL_CreateProperties();
+        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_WINDOWPOS_CENTERED);
+        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_Y_NUMBER, SDL_WINDOWPOS_CENTERED);
+        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, WIDTH);
+        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, HEIGHT);
+        SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
+        
+        Window = SDL_CreateWindowWithProperties(WindowProperties);
+        
+        SDL_DestroyProperties(WindowProperties);
+
         Assert(Window != nullptr, "Could not create SDL window");
     }
 
@@ -176,11 +189,11 @@ private: // Functions
             }
         }
 
-        Assert(SDL_Vulkan_GetInstanceExtensions(Window, &ExtCount, nullptr) == SDL_TRUE, "Could not get number of required SDL extensions");
+        char const* const* RequiredSDLExtensions = SDL_Vulkan_GetInstanceExtensions(&ExtCount);
+        Assert(RequiredSDLExtensions != nullptr, "Could not get number of required SDL extensions");
 
         std::vector<const char*> RequiredLayers;
-        std::vector<const char*> RequiredExtensions(ExtCount);
-        Assert(SDL_Vulkan_GetInstanceExtensions(Window, &ExtCount, RequiredExtensions.data()) == SDL_TRUE, "Could not get required SDL extensions");
+        std::vector<const char*> RequiredExtensions(RequiredSDLExtensions, RequiredSDLExtensions + ExtCount); // Create RequiredExtensions vector with copy of the RequiredSDLExtensions array
 
 #ifdef DEBUG // Only add the validation layer/extension if this is a debug build
         RequiredLayers.push_back("VK_LAYER_KHRONOS_validation");
@@ -415,80 +428,127 @@ private: // Functions
         Assert(vkCreateFence(Device, &FenceInfo, nullptr, &Fence) == VK_SUCCESS, "Failed to create fence");
     }
 
-    void AllocateMemory(const VkMemoryRequirements& rMemoryRequirements, VkMemoryPropertyFlags Flags, uint32_t HeapIndex, VkDeviceMemory& rMemory) const
+    void AllocateMemory(const VkMemoryRequirements& rMemoryRequirements, uint32_t HeapType, VkDeviceMemory& rMemory) const
     {
-        for (uint32_t i = 0; i < MemoryProperties.memoryTypeCount; i++)
+        if ((rMemoryRequirements.memoryTypeBits & (1 << HeapType)) == 0)
         {
-            if ((rMemoryRequirements.memoryTypeBits & (1 << i))
-                && ((MemoryProperties.memoryTypes[i].propertyFlags & Flags) == Flags)
-                && (MemoryProperties.memoryTypes[i].heapIndex == HeapIndex))
-            {
-                VkMemoryAllocateInfo AllocationInfo =
-                {
-                    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                    .pNext = nullptr,
-                    .allocationSize = rMemoryRequirements.size,
-                    .memoryTypeIndex = i
-                };
-
-                Assert(vkAllocateMemory(Device, &AllocationInfo, nullptr, &rMemory) == VK_SUCCESS, "Failed to allocate vertex buffer memory");
-                break;
-            }
+            Assert(false, "Required memory heap not supported for allocation");
         }
 
-        Assert(rMemory != nullptr, "Unable to allocate memory");
+        VkMemoryAllocateInfo AllocationInfo =
+        {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .pNext = nullptr,
+            .allocationSize = rMemoryRequirements.size,
+            .memoryTypeIndex = HeapType
+        };
+
+        Assert(vkAllocateMemory(Device, &AllocationInfo, nullptr, &rMemory) == VK_SUCCESS, "Failed to allocate memory");
     }
 
-    void InitializeMemoryHeaps(void)
+    void EnumerateMemoryHeaps(void)
     {
         vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &MemoryProperties);
 
-        for (uint32_t i = 0; i < MemoryProperties.memoryTypeCount; i++)
+        // Helper lambda to scan available memory types
+        std::function<bool(uint32_t, uint32_t&)> FindHeap = [&](uint32_t Flags, uint32_t& MemoryType) -> bool
         {
-            uint64_t HeapSize = MemoryProperties.memoryHeaps[MemoryProperties.memoryTypes[i].heapIndex].size;
-
-            if (MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+            uint32_t Mask = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+            uint64_t MaxSize = 0;
+            MemoryType = UINT32_MAX;
+            for (uint32_t i = 0; i < MemoryProperties.memoryTypeCount; i++)
             {
-                if ((PrimaryHeapIndex == UINT32_MAX) || (HeapSize > MemoryProperties.memoryHeaps[PrimaryHeapIndex].size))
+                uint32_t HeapIndex = MemoryProperties.memoryTypes[i].heapIndex;
+                uint64_t HeapSize = MemoryProperties.memoryHeaps[HeapIndex].size;
+                uint32_t HeapFlags = MemoryProperties.memoryTypes[i].propertyFlags;
+                if ((HeapFlags & Mask) == Flags && HeapSize > MaxSize)
                 {
-                    PrimaryHeapIndex = MemoryProperties.memoryTypes[i].heapIndex;
+                    MemoryType = i;
+                    MaxSize = HeapSize;
                 }
             }
+            return (MemoryType != UINT32_MAX);
+        };
 
-            if (((MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == 0)
-                && (MemoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
+        uint32_t GpuLocalCpuVisibleHeap = UINT32_MAX; // GPU Local VRAM + CPU Visible Heap
+        uint32_t GpuLocalCpuInvisibleHeap = UINT32_MAX; // GPU Local VRAM + CPU Invisible Heap
+
+        // Try to find GpuLocalCpuVisibleHeap
+        if (FindHeap(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, GpuLocalCpuVisibleHeap)) {} // GPU Local VRAM, HostVisible, HostCoherent, !HostCached
+        else if (FindHeap(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, GpuLocalCpuVisibleHeap)) {} // GPU Local VRAM, HostVisible, !HostCoherent, !HostCached
+
+        // Try to find GpuLocalCpuInvisibleHeap
+        if (FindHeap(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, GpuLocalCpuInvisibleHeap)) {} // GPU Local VRAM, !HostVisible, !HostCoherent, !HostCached
+
+        if (GpuLocalCpuVisibleHeap != UINT32_MAX && GpuLocalCpuInvisibleHeap != UINT32_MAX
+            && MemoryProperties.memoryTypes[GpuLocalCpuVisibleHeap].heapIndex == MemoryProperties.memoryTypes[GpuLocalCpuInvisibleHeap].heapIndex)
+        {
+            // If both the GPU Local VRAM + CPU visible and CPU invisible memory types are on the same memory heap, we can just use the CPU visible one
+            // This happens when resizable bar is enabled
+            PrimaryHeap = GpuLocalCpuVisibleHeap;
+            UploadHeap = UINT32_MAX; // Upload heap is not needed, we will write our data directly to the GPU VRAM
+        }
+        else if (GpuLocalCpuVisibleHeap != UINT32_MAX && GpuLocalCpuInvisibleHeap == UINT32_MAX)
+        {
+            // If there is no GPU Local VRAM + CPU invisible heap, but there is a GPU Local VRAM + CPU visible heap, we can use that
+            // This can happen on iGPUs
+            PrimaryHeap = GpuLocalCpuVisibleHeap;
+            UploadHeap = UINT32_MAX; // Upload heap is not needed, we will write our data directly to the GPU VRAM
+        }
+        else if (GpuLocalCpuInvisibleHeap != UINT32_MAX)
+        {
+            // Otherwise we try to default to the primary heap being the GPU Local VRAM + CPU invisible heap
+            // And the upload heap being the GPU Local VRAM + CPU visible heap
+            PrimaryHeap = GpuLocalCpuInvisibleHeap;
+
+            if (GpuLocalCpuVisibleHeap != UINT32_MAX) UploadHeap = GpuLocalCpuVisibleHeap;
+            else if (FindHeap(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, UploadHeap)) {}
+            else if (FindHeap(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, UploadHeap)) {}
+            else
             {
-                if ((UploadHeapIndex == UINT32_MAX) || (HeapSize > MemoryProperties.memoryHeaps[UploadHeapIndex].size))
-                {
-                    UploadHeapIndex = MemoryProperties.memoryTypes[i].heapIndex;
-                    UploadBufferSize = std::min(ALIGN(HeapSize / 4, MB), static_cast<uint64_t>(16 * MB));
-                }
+                // Cannot find a suitable upload heap
+                PrimaryHeap = UINT32_MAX;
+                UploadHeap = UINT32_MAX;
             }
         }
 
-        Assert(PrimaryHeapIndex != UINT32_MAX, "Could not find primary heap");
-        Assert(UploadHeapIndex != UINT32_MAX, "Could not find upload heap");
-
-        VkBufferCreateInfo UploadBufferInfo =
+        if (PrimaryHeap == UINT32_MAX)
         {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = 0,
-            .size = UploadBufferSize,
-            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .queueFamilyIndexCount = 0,
-            .pQueueFamilyIndices = nullptr
-        };
+            // If we couldn't find suitable device local memory, we fall back to system memory for the primary heap
+            if (FindHeap(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, PrimaryHeap)) {}
+            else if (FindHeap(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, PrimaryHeap)) {}
+            else
+            {
+                Assert(false, "Unable to find primary heap");
+            }
+        }
 
-        Assert(vkCreateBuffer(Device, &UploadBufferInfo, nullptr, &UploadBuffer) == VK_SUCCESS, "Failed to create upload buffer");
+        if (UploadHeap != UINT32_MAX)
+        {
+            uint64_t HeapSize = MemoryProperties.memoryHeaps[MemoryProperties.memoryTypes[UploadHeap].heapIndex].size;
+            UploadBufferSize = std::min(ALIGN(HeapSize / 4, MB), static_cast<uint64_t>(16 * MB));
 
-        VkMemoryRequirements UploadBufferRequirements = {};
-        vkGetBufferMemoryRequirements(Device, UploadBuffer, &UploadBufferRequirements);
+            VkBufferCreateInfo UploadBufferInfo =
+            {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = 0,
+                .size = UploadBufferSize,
+                .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                .queueFamilyIndexCount = 0,
+                .pQueueFamilyIndices = nullptr
+            };
 
-        AllocateMemory(UploadBufferRequirements, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, UploadHeapIndex, UploadBufferMemory);
-        Assert(vkBindBufferMemory(Device, UploadBuffer, UploadBufferMemory, 0) == VK_SUCCESS, "Failed to bind upload buffer memory");
-        Assert(vkMapMemory(Device, UploadBufferMemory, 0, UploadBufferSize, 0, &UploadBufferCpuVA) == VK_SUCCESS, "Failed to map upload buffer memory");
+            Assert(vkCreateBuffer(Device, &UploadBufferInfo, nullptr, &UploadBuffer) == VK_SUCCESS, "Failed to create upload buffer");
+
+            VkMemoryRequirements UploadBufferRequirements = {};
+            vkGetBufferMemoryRequirements(Device, UploadBuffer, &UploadBufferRequirements);
+
+            AllocateMemory(UploadBufferRequirements, UploadHeap, UploadBufferMemory);
+            Assert(vkBindBufferMemory(Device, UploadBuffer, UploadBufferMemory, 0) == VK_SUCCESS, "Failed to bind upload buffer memory");
+            Assert(vkMapMemory(Device, UploadBufferMemory, 0, UploadBufferSize, 0, &UploadBufferCpuVA) == VK_SUCCESS, "Failed to map upload buffer memory");
+        }
     }
 
     void CreateSwapchain(void)
@@ -555,8 +615,11 @@ private: // Functions
             .flags = 0
         };
 
-        Assert(vkCreateSemaphore(Device, &SemaphoreInfo, nullptr, &AcquireSemaphore) == VK_SUCCESS, "Failed to create semaphore");
-        Assert(vkCreateSemaphore(Device, &SemaphoreInfo, nullptr, &ReleaseSemaphore) == VK_SUCCESS, "Failed to create semaphore");
+        for (uint32_t i = 0; i < NumSwapchainImages; i++)
+        {
+            Assert(vkCreateSemaphore(Device, &SemaphoreInfo, nullptr, &RenderSemaphores[i]) == VK_SUCCESS, "Failed to create render semaphore %u", i);
+            Assert(vkCreateSemaphore(Device, &SemaphoreInfo, nullptr, &PresentSemaphores[i]) == VK_SUCCESS, "Failed to create present semaphore %u", i);
+        }
     }
 
     void CreateRenderPass(void)
@@ -689,7 +752,7 @@ private: // Functions
         VkMemoryRequirements BufferRequirements = {};
         vkGetBufferMemoryRequirements(Device, VertexBuffer, &BufferRequirements);
 
-        AllocateMemory(BufferRequirements, PrimaryHeapIndex, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VertexBufferMemory);
+        AllocateMemory(BufferRequirements, PrimaryHeap, VertexBufferMemory);
         Assert(vkBindBufferMemory(Device, VertexBuffer, VertexBufferMemory, 0) == VK_SUCCESS, "Failed to bind vertex buffer memory");
 
         VkMappedMemoryRange FlushRange =
@@ -1030,14 +1093,14 @@ private: // Functions
         {
             switch (event.type)
             {
-                case SDL_QUIT:
+                case SDL_EVENT_QUIT:
                 {
                     Running = false; // The main loop will exit once this becomes false
                     break;
                 }
-                case SDL_KEYDOWN:
+                case SDL_EVENT_KEY_DOWN:
                 {
-                    switch (event.key.keysym.scancode)
+                    switch (event.key.scancode)
                     {
                         case SDL_SCANCODE_ESCAPE:
                             Running = false; // The main loop will exit once this becomes false
@@ -1056,7 +1119,7 @@ private: // Functions
     void Render(void)
     {
         uint32_t SwapchainIndex = 0;
-        Assert(vkAcquireNextImageKHR(Device, Swapchain, UINT64_MAX, AcquireSemaphore, nullptr, &SwapchainIndex) == VK_SUCCESS, "Could not get next surface image");
+        Assert(vkAcquireNextImageKHR(Device, Swapchain, 1 * NANOSECONDS_PER_SECOND, RenderSemaphores[FrameIndex], nullptr, &SwapchainIndex) == VK_SUCCESS, "Could not get next surface image");
 
         // Color buffer clear color
         VkClearValue ClearColor;
@@ -1117,12 +1180,12 @@ private: // Functions
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .pNext = nullptr,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &AcquireSemaphore,
+            .pWaitSemaphores = &RenderSemaphores[FrameIndex],
             .pWaitDstStageMask = WaitDstStageMasks,
             .commandBufferCount = 1,
             .pCommandBuffers = &CommandBuffer,
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &ReleaseSemaphore
+            .pSignalSemaphores = &PresentSemaphores[SwapchainIndex]
         };
 
         VkPresentInfoKHR PresentInfo =
@@ -1130,7 +1193,7 @@ private: // Functions
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .pNext = nullptr,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &ReleaseSemaphore,
+            .pWaitSemaphores = &PresentSemaphores[SwapchainIndex],
             .swapchainCount = 1,
             .pSwapchains = &Swapchain,
             .pImageIndices = &SwapchainIndex,
@@ -1142,6 +1205,8 @@ private: // Functions
         
         Assert(vkWaitForFences(Device, 1, &Fence, VK_TRUE, 1 * NANOSECONDS_PER_SECOND) == VK_SUCCESS, "Fence timeout");
         Assert(vkResetFences(Device, 1, &Fence) == VK_SUCCESS, "Could not reset fence");
+
+        FrameIndex = (FrameIndex + 1) % NumSwapchainImages;
     }
 
 public: // Functions
@@ -1152,9 +1217,9 @@ public: // Functions
         EnumerateGPUs();
         CreateVulkanDevice();
         CreateGraphicsQueue();
-        InitializeMemoryHeaps();
-        
-        Assert(SDL_Vulkan_CreateSurface(Window, Instance, &Surface) == VK_TRUE, "Failed to create surface");
+        EnumerateMemoryHeaps();
+
+        Assert(SDL_Vulkan_CreateSurface(Window, Instance, nullptr, &Surface) == VK_TRUE, "Failed to create surface");
         CreateSwapchain();
         CreateRenderPass();
         CreateFramebuffers();
@@ -1215,16 +1280,19 @@ public: // Functions
             RenderPass = nullptr;
         }
 
-        if (AcquireSemaphore != nullptr)
+        for (uint32_t i = 0; i < MaxSwapchainImages; i++)
         {
-            vkDestroySemaphore(Device, AcquireSemaphore, nullptr);
-            AcquireSemaphore = nullptr;
-        }
+            if (RenderSemaphores[i] != nullptr)
+            {
+                vkDestroySemaphore(Device, RenderSemaphores[i], nullptr);
+                RenderSemaphores[i] = nullptr;
+            }
 
-        if (ReleaseSemaphore != nullptr)
-        {
-            vkDestroySemaphore(Device, ReleaseSemaphore, nullptr);
-            ReleaseSemaphore = nullptr;
+            if (PresentSemaphores[i] != nullptr)
+            {
+                vkDestroySemaphore(Device, PresentSemaphores[i], nullptr);
+                PresentSemaphores[i] = nullptr;
+            }
         }
 
         if (Swapchain != nullptr)
