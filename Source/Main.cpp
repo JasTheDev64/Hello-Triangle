@@ -553,6 +553,8 @@ private: // Functions
 
     void CreateSwapchain(void)
     {
+        Assert(SDL_Vulkan_CreateSurface(Window, Instance, nullptr, &Surface) == VK_TRUE, "Failed to create surface");
+
         uint32_t PresentModeCount = 0;
         uint32_t SurfaceFormatCount = 0;
 
@@ -1219,7 +1221,6 @@ public: // Functions
         CreateGraphicsQueue();
         EnumerateMemoryHeaps();
 
-        Assert(SDL_Vulkan_CreateSurface(Window, Instance, nullptr, &Surface) == VK_TRUE, "Failed to create surface");
         CreateSwapchain();
         CreateRenderPass();
         CreateFramebuffers();
