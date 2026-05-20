@@ -272,7 +272,7 @@ private: // Functions
             }
 
             // Comparison operator to compare two devices
-            // Checks if this device has a greater preference, graphics queue count, or local heap size than the other device
+            // Checks if this device has a greater preference, graphics queue count, and local heap size than the other device
             bool operator > (const PhysicalDeviceInfo& rOtherDevice) const
             {
                 return std::tie(this->PreferenceIndex, this->NumGraphicsQueues, this->LocalHeapSize) >
