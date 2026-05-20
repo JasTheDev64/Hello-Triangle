@@ -140,7 +140,7 @@ private: // Functions
     static VkBool32 VulkanDebugReportCb(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT objectType, uint64_t object, size_t location, int32_t messageCode, const char* pLayerPrefix, const char* pMessage, void* pUserData)
     {
         printf("%s: %s\n", pLayerPrefix, pMessage);
-        return VK_TRUE;
+        return VK_FALSE; // The vulkan spec states the application should always return VK_FALSE, because VK_TRUE is only used in layer development
     }
 #endif
 
@@ -344,19 +344,19 @@ private: // Functions
         uint32_t ExtCount = 0;
         uint32_t LayerCount = 0;
 
-        Assert(vkEnumerateDeviceLayerProperties(PhysicalDevice, &ExtCount, nullptr) == VK_SUCCESS, "Failed to get number of device layers");
+        Assert(vkEnumerateDeviceLayerProperties(PhysicalDevice, &LayerCount, nullptr) == VK_SUCCESS, "Failed to get number of device layers");
 
-        std::vector<VkLayerProperties> AvailableLayers(ExtCount);
-        Assert(vkEnumerateDeviceLayerProperties(PhysicalDevice, &ExtCount, AvailableLayers.data()) == VK_SUCCESS, "Failed to get device layers");
+        std::vector<VkLayerProperties> AvailableLayers(LayerCount);
+        Assert(vkEnumerateDeviceLayerProperties(PhysicalDevice, &LayerCount, AvailableLayers.data()) == VK_SUCCESS, "Failed to get device layers");
 
         for (uint32_t i = 0; i <= AvailableLayers.size(); i++)
         {
             const char* pLayerName = (i == 0) ? nullptr : AvailableLayers[i - 1].layerName;
 
-            Assert(vkEnumerateDeviceExtensionProperties(PhysicalDevice, pLayerName, &LayerCount, nullptr) == VK_SUCCESS, "Could not get extension count for instance layer");
+            Assert(vkEnumerateDeviceExtensionProperties(PhysicalDevice, pLayerName, &ExtCount, nullptr) == VK_SUCCESS, "Could not get extension count for instance layer");
 
-            std::vector<VkExtensionProperties> AvailableExtensions(LayerCount);
-            Assert(vkEnumerateDeviceExtensionProperties(PhysicalDevice, pLayerName, &LayerCount, AvailableExtensions.data()) == VK_SUCCESS, "Could not get extensions for instance layer");
+            std::vector<VkExtensionProperties> AvailableExtensions(ExtCount);
+            Assert(vkEnumerateDeviceExtensionProperties(PhysicalDevice, pLayerName, &ExtCount, AvailableExtensions.data()) == VK_SUCCESS, "Could not get extensions for instance layer");
 
             printf("Device layer: %s\n", (pLayerName == nullptr) ? "Global" : pLayerName);
             for (uint32_t j = 0; j < AvailableExtensions.size(); j++)
@@ -556,7 +556,7 @@ private: // Functions
 
     void CreateSwapchain(void)
     {
-        Assert(SDL_Vulkan_CreateSurface(Window, Instance, nullptr, &Surface) == VK_TRUE, "Failed to create surface");
+        Assert(SDL_Vulkan_CreateSurface(Window, Instance, nullptr, &Surface), "Failed to create surface");
 
         uint32_t PresentModeCount = 0;
         uint32_t SurfaceFormatCount = 0;
