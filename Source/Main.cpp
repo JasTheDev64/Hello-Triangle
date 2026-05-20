@@ -1217,6 +1217,10 @@ private: // Functions
 public: // Functions
     HelloTriangle(void)
     {
+    }
+
+    void Init(void)
+    {
         CreateWindow();
         CreateVulkanInstance();
         EnumerateGPUs();
@@ -1391,6 +1395,7 @@ public: // Functions
 int main(int argc, char* argv[])
 {
     HelloTriangle App;
+    App.Init();
     App.Run();
 
     return 0;
