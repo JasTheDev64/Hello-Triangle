@@ -273,14 +273,10 @@ private: // Functions
 
             // Comparison operator to compare two devices
             // Checks if this device has a greater preference, graphics queue count, or local heap size than the other device
-            bool operator > (const PhysicalDeviceInfo& rOtherDevice)
+            bool operator > (const PhysicalDeviceInfo& rOtherDevice) const
             {
-                #define COMPARE(a, b) { if ((a) > (b)) { return true; } else if ((a) < (b)) { return false; } }
-                COMPARE(this->PreferenceIndex, rOtherDevice.PreferenceIndex);
-                COMPARE(this->NumGraphicsQueues, rOtherDevice.NumGraphicsQueues);
-                COMPARE(this->LocalHeapSize, rOtherDevice.LocalHeapSize);
-                return false;
-                #undef COMPARE
+                return std::tie(this->PreferenceIndex, this->NumGraphicsQueues, this->LocalHeapSize) >
+                    std::tie(rOtherDevice.PreferenceIndex, rOtherDevice.NumGraphicsQueues, rOtherDevice.LocalHeapSize);
             }
         };
 
