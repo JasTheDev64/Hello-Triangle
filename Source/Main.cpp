@@ -502,11 +502,10 @@ private: // Functions
         else if (GpuLocalCpuInvisibleHeap != UINT32_MAX)
         {
             // Otherwise we try to default to the primary heap being the GPU Local VRAM + CPU invisible heap
-            // And the upload heap being the GPU Local VRAM + CPU visible heap
+            // And the upload heap being on the system memory
             PrimaryHeap = GpuLocalCpuInvisibleHeap;
 
-            if (GpuLocalCpuVisibleHeap != UINT32_MAX) UploadHeap = GpuLocalCpuVisibleHeap;
-            else if (FindHeap(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, UploadHeap)) {}
+            if (FindHeap(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, UploadHeap)) {}
             else if (FindHeap(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, UploadHeap)) {}
             else
             {
