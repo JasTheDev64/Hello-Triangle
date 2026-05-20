@@ -550,7 +550,7 @@ private: // Functions
 
             AllocateMemory(UploadBufferRequirements, UploadHeap, UploadBufferMemory);
             Assert(vkBindBufferMemory(Device, UploadBuffer, UploadBufferMemory, 0) == VK_SUCCESS, "Failed to bind upload buffer memory");
-            Assert(vkMapMemory(Device, UploadBufferMemory, 0, UploadBufferSize, 0, &UploadBufferCpuVA) == VK_SUCCESS, "Failed to map upload buffer memory");
+            Assert(vkMapMemory(Device, UploadBufferMemory, 0, UploadBufferRequirements.size, 0, &UploadBufferCpuVA) == VK_SUCCESS, "Failed to map upload buffer memory");
         }
     }
 
