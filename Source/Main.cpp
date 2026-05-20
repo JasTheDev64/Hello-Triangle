@@ -769,44 +769,57 @@ private: // Functions
             .size = VK_WHOLE_SIZE
         };
 
-        memcpy(reinterpret_cast<uint8_t*>(UploadBufferCpuVA), TriangleVertices, sizeof(TriangleVertices));
-        Assert(vkFlushMappedMemoryRanges(Device, 1, &FlushRange) == VK_SUCCESS, "Failed to flush vertex buffer memory");
-
-        VkCommandBufferBeginInfo CommandBufferBeginInfo =
+        if (UploadBufferCpuVA)
         {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext = nullptr,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-            .pInheritanceInfo = nullptr
-        };
+            memcpy(reinterpret_cast<uint8_t*>(UploadBufferCpuVA), TriangleVertices, sizeof(TriangleVertices));
+            Assert(vkFlushMappedMemoryRanges(Device, 1, &FlushRange) == VK_SUCCESS, "Failed to flush vertex buffer memory");
 
-        VkBufferCopy CopyCmd =
+            VkCommandBufferBeginInfo CommandBufferBeginInfo =
+            {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                .pNext = nullptr,
+                .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+                .pInheritanceInfo = nullptr
+            };
+
+            VkBufferCopy CopyCmd =
+            {
+                .srcOffset = 0,
+                .dstOffset = 0,
+                .size = sizeof(TriangleVertices)
+            };
+
+            Assert(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo) == VK_SUCCESS, "Failed to initialize command buffer");
+            vkCmdCopyBuffer(CommandBuffer, UploadBuffer, VertexBuffer, 1, &CopyCmd);
+            Assert(vkEndCommandBuffer(CommandBuffer) == VK_SUCCESS, "Failed to finalize command buffer");
+
+            VkSubmitInfo SubmitInfo =
+            {
+                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                .pNext = nullptr,
+                .waitSemaphoreCount = 0,
+                .pWaitSemaphores = nullptr,
+                .pWaitDstStageMask = nullptr,
+                .commandBufferCount = 1,
+                .pCommandBuffers = &CommandBuffer,
+                .signalSemaphoreCount = 0,
+                .pSignalSemaphores = nullptr
+            };
+
+            Assert(vkQueueSubmit(GraphicsQueue, 1, &SubmitInfo, Fence) == VK_SUCCESS, "Failed to submit command buffer");
+            Assert(vkWaitForFences(Device, 1, &Fence, VK_TRUE, 1 * NANOSECONDS_PER_SECOND) == VK_SUCCESS, "Fence timeout");
+            Assert(vkResetFences(Device, 1, &Fence) == VK_SUCCESS, "Could not reset fence");
+        }
+        else
         {
-            .srcOffset = 0,
-            .dstOffset = 0,
-            .size = sizeof(TriangleVertices)
-        };
+            void* VertexBufferCpuVA = nullptr;
+            Assert(vkMapMemory(Device, VertexBufferMemory, 0, BufferRequirements.size, 0, &VertexBufferCpuVA) == VK_SUCCESS, "Failed to map vertex buffer memory");
 
-        Assert(vkBeginCommandBuffer(CommandBuffer, &CommandBufferBeginInfo) == VK_SUCCESS, "Failed to initialize command buffer");
-        vkCmdCopyBuffer(CommandBuffer, UploadBuffer, VertexBuffer, 1, &CopyCmd);
-        Assert(vkEndCommandBuffer(CommandBuffer) == VK_SUCCESS, "Failed to finalize command buffer");
+            memcpy(reinterpret_cast<uint8_t*>(UploadBufferCpuVA), TriangleVertices, sizeof(TriangleVertices));
+            Assert(vkFlushMappedMemoryRanges(Device, 1, &FlushRange) == VK_SUCCESS, "Failed to flush vertex buffer memory");
 
-        VkSubmitInfo SubmitInfo =
-        {
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .pNext = nullptr,
-            .waitSemaphoreCount = 0,
-            .pWaitSemaphores = nullptr,
-            .pWaitDstStageMask = nullptr,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &CommandBuffer,
-            .signalSemaphoreCount = 0,
-            .pSignalSemaphores = nullptr
-        };
-
-        Assert(vkQueueSubmit(GraphicsQueue, 1, &SubmitInfo, Fence) == VK_SUCCESS, "Failed to submit command buffer");
-        Assert(vkWaitForFences(Device, 1, &Fence, VK_TRUE, 1 * NANOSECONDS_PER_SECOND) == VK_SUCCESS, "Fence timeout");
-        Assert(vkResetFences(Device, 1, &Fence) == VK_SUCCESS, "Could not reset fence");
+            vkUnmapMemory(Device, VertexBufferMemory);
+        }
     }
 
     void CreateGraphicsPipeline(void)
