@@ -294,7 +294,7 @@ private: // Functions
 
         for (uint32_t i = 0; i < DeviceHandles.size(); i++)
         {
-            PhysicalDeviceInfo DeviceInfo = { DeviceHandles[i], i,};
+            PhysicalDeviceInfo DeviceInfo = { DeviceHandles[i], i };
 
             VkPhysicalDeviceProperties DeviceProperties {};
             VkPhysicalDeviceMemoryProperties MemoryProperties {};
