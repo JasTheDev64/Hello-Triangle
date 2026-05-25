@@ -3,7 +3,6 @@
 #include <cstdarg>
 #include <cstdint>
 
-#include <algorithm>
 #include <functional>
 #include <map>
 #include <vector>
