@@ -525,6 +525,7 @@ private: // Functions
             }
         }
 
+        // If we have an upload heap, we will need an upload buffer on that heap
         if (UploadHeap != UINT32_MAX)
         {
             uint64_t HeapSize = MemoryProperties.memoryHeaps[MemoryProperties.memoryTypes[UploadHeap].heapIndex].size;
@@ -761,7 +762,7 @@ private: // Functions
 
         if (UploadBufferCpuVA)
         {
-            // Copy the vertex data to the upload buffer
+            // If the upload heap is being used, we have to copy our allocation to the upload buffer, and then transfer it to the primary allocation
             VkMappedMemoryRange FlushRange =
             {
                 .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
@@ -794,7 +795,7 @@ private: // Functions
             vkCmdCopyBuffer(CommandBuffer, UploadBuffer, VertexBuffer, 1, &CopyCmd);
             Assert(vkEndCommandBuffer(CommandBuffer) == VK_SUCCESS, "Failed to finalize command buffer");
 
-            // Submit the copy command buffer to the graphics queue
+            // Submit the copy command buffer to the graphics queue and wait for the copy to finish
             VkSubmitInfo SubmitInfo =
             {
                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -814,7 +815,7 @@ private: // Functions
         }
         else
         {
-            // Map the vertex buffer memory so we can copy our vertex data directly to it
+            // If we don't need an upload heap, it means we can map the primary buffer's memory and copy our vertex data directly to it
             void* VertexBufferCpuVA = nullptr;
             Assert(vkMapMemory(Device, VertexBufferMemory, 0, BufferRequirements.size, 0, &VertexBufferCpuVA) == VK_SUCCESS, "Failed to map vertex buffer memory");
 
