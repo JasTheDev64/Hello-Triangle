@@ -247,12 +247,14 @@ private: // Functions
 
     void EnumerateGPUs(void)
     {
+        // GPU type preference order - we are only interested in discrete and integrated adapters
         const std::map<VkPhysicalDeviceType, uint32_t> PreferenceOrder =
         {
             { VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,   2 },
             { VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU, 1 }
         };
 
+        // Helper structure for comparing GPUs
         struct PhysicalDeviceInfo
         {
             VkPhysicalDevice Handle = nullptr;
