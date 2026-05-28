@@ -433,9 +433,11 @@ private: // Functions
         Assert(vkCreateFence(Device, &FenceInfo, nullptr, &Fence) == VK_SUCCESS, "Failed to create fence");
     }
 
-    void AllocateMemory(const VkMemoryRequirements& rMemoryRequirements, uint32_t HeapType, VkDeviceMemory& rMemory) const
+    void AllocateMemory(VkBuffer hBuffer, uint32_t HeapIndex, VkMemoryRequirements& rMemoryRequirements, VkDeviceMemory& rMemory) const
     {
-        if ((rMemoryRequirements.memoryTypeBits & (1 << HeapType)) == 0)
+        vkGetBufferMemoryRequirements(Device, hBuffer, &rMemoryRequirements);
+
+        if ((rMemoryRequirements.memoryTypeBits & (1 << HeapIndex)) == 0)
         {
             Assert(false, "Required memory heap not supported for allocation");
         }
@@ -445,7 +447,7 @@ private: // Functions
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
             .pNext = nullptr,
             .allocationSize = rMemoryRequirements.size,
-            .memoryTypeIndex = HeapType
+            .memoryTypeIndex = HeapIndex
         };
 
         Assert(vkAllocateMemory(Device, &AllocationInfo, nullptr, &rMemory) == VK_SUCCESS, "Failed to allocate memory");
@@ -548,9 +550,8 @@ private: // Functions
             Assert(vkCreateBuffer(Device, &UploadBufferInfo, nullptr, &UploadBuffer) == VK_SUCCESS, "Failed to create upload buffer");
 
             VkMemoryRequirements UploadBufferRequirements = {};
-            vkGetBufferMemoryRequirements(Device, UploadBuffer, &UploadBufferRequirements);
+            AllocateMemory(UploadBuffer, UploadHeap, UploadBufferRequirements, UploadBufferMemory);
 
-            AllocateMemory(UploadBufferRequirements, UploadHeap, UploadBufferMemory);
             Assert(vkBindBufferMemory(Device, UploadBuffer, UploadBufferMemory, 0) == VK_SUCCESS, "Failed to bind upload buffer memory");
             Assert(vkMapMemory(Device, UploadBufferMemory, 0, UploadBufferRequirements.size, 0, &UploadBufferCpuVA) == VK_SUCCESS, "Failed to map upload buffer memory");
         }
@@ -756,10 +757,9 @@ private: // Functions
 
         Assert(vkCreateBuffer(Device, &BufferInfo, nullptr, &VertexBuffer) == VK_SUCCESS, "Failed to create vertex buffer");
 
-        VkMemoryRequirements BufferRequirements = {};
-        vkGetBufferMemoryRequirements(Device, VertexBuffer, &BufferRequirements);
+        VkMemoryRequirements VertexBufferRequirements = {};
+        AllocateMemory(VertexBuffer, PrimaryHeap, VertexBufferRequirements, VertexBufferMemory);
 
-        AllocateMemory(BufferRequirements, PrimaryHeap, VertexBufferMemory);
         Assert(vkBindBufferMemory(Device, VertexBuffer, VertexBufferMemory, 0) == VK_SUCCESS, "Failed to bind vertex buffer memory");
 
         if (UploadBufferCpuVA)
@@ -819,7 +819,7 @@ private: // Functions
         {
             // If we don't need an upload heap, it means we can map the primary buffer's memory and copy our vertex data directly to it
             void* VertexBufferCpuVA = nullptr;
-            Assert(vkMapMemory(Device, VertexBufferMemory, 0, BufferRequirements.size, 0, &VertexBufferCpuVA) == VK_SUCCESS, "Failed to map vertex buffer memory");
+            Assert(vkMapMemory(Device, VertexBufferMemory, 0, VertexBufferRequirements.size, 0, &VertexBufferCpuVA) == VK_SUCCESS, "Failed to map vertex buffer memory");
 
             VkMappedMemoryRange FlushRange =
             {
