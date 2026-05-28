@@ -153,6 +153,7 @@ private: // Functions
         SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_Y_NUMBER, SDL_WINDOWPOS_CENTERED);
         SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, WIDTH);
         SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, HEIGHT);
+        SDL_SetStringProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_TITLE_STRING, APP_NAME);
         SDL_SetNumberProperty(WindowProperties, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
         
         Window = SDL_CreateWindowWithProperties(WindowProperties);
