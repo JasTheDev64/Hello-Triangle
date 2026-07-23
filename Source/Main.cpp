@@ -461,7 +461,7 @@ private: // Functions
         // Helper lambda to scan available memory types
         std::function<bool(uint32_t, uint32_t&)> FindHeap = [&](uint32_t Flags, uint32_t& MemoryType) -> bool
         {
-            uint32_t Mask = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+            uint32_t Mask = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
             uint64_t MaxSize = 0;
             MemoryType = UINT32_MAX;
             for (uint32_t i = 0; i < MemoryProperties.memoryTypeCount; i++)

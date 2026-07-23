@@ -8,6 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		418A80252FFA082C00ADAFCF /* Main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 418A80242FFA082C00ADAFCF /* Main.cpp */; };
+		41B477952FFA0BF900E21EF9 /* SDL3.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 41B477942FFA0BF900E21EF9 /* SDL3.framework */; };
+		41B477962FFA0BF900E21EF9 /* SDL3.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 41B477942FFA0BF900E21EF9 /* SDL3.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		41B477992FFA0C3500E21EF9 /* vulkan.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 41B477982FFA0C3500E21EF9 /* vulkan.framework */; };
+		41B4779A2FFA0C3500E21EF9 /* vulkan.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 41B477982FFA0C3500E21EF9 /* vulkan.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -20,6 +24,18 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 		};
+		41B477972FFA0BF900E21EF9 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				41B477962FFA0BF900E21EF9 /* SDL3.framework in Embed Frameworks */,
+				41B4779A2FFA0C3500E21EF9 /* vulkan.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +45,8 @@
 		418A80272FFA084000ADAFCF /* FragmentShader.frag.glsl */ = {isa = PBXFileReference; lastKnownFileType = text; name = FragmentShader.frag.glsl; path = Source/FragmentShader.frag.glsl; sourceTree = "<group>"; };
 		418A80282FFA084000ADAFCF /* VertexShader.vert.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = VertexShader.vert.h; path = Source/VertexShader.vert.h; sourceTree = "<group>"; };
 		418A80292FFA084000ADAFCF /* VertexShader.vert.glsl */ = {isa = PBXFileReference; lastKnownFileType = text; name = VertexShader.vert.glsl; path = Source/VertexShader.vert.glsl; sourceTree = "<group>"; };
+		41B477942FFA0BF900E21EF9 /* SDL3.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SDL3.framework; path = "../../../../Library/Frameworks/SDL3.xcframework/macos-arm64_x86_64/SDL3.framework"; sourceTree = "<group>"; };
+		41B477982FFA0C3500E21EF9 /* vulkan.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = vulkan.framework; path = ../../VulkanSDK/1.4.350.1/macOS/Frameworks/vulkan.framework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -36,6 +54,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				41B477952FFA0BF900E21EF9 /* SDL3.framework in Frameworks */,
+				41B477992FFA0C3500E21EF9 /* vulkan.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -51,6 +71,7 @@
 				418A80272FFA084000ADAFCF /* FragmentShader.frag.glsl */,
 				418A80282FFA084000ADAFCF /* VertexShader.vert.h */,
 				418A80292FFA084000ADAFCF /* VertexShader.vert.glsl */,
+				41B477932FFA0BF900E21EF9 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -60,6 +81,15 @@
 				414A47C92FFA07DB00C26555 /* Hello-Triangle */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		41B477932FFA0BF900E21EF9 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				41B477982FFA0C3500E21EF9 /* vulkan.framework */,
+				41B477942FFA0BF900E21EF9 /* SDL3.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -72,6 +102,7 @@
 				414A47C52FFA07DB00C26555 /* Sources */,
 				414A47C62FFA07DB00C26555 /* Frameworks */,
 				414A47C72FFA07DB00C26555 /* CopyFiles */,
+				41B477972FFA0BF900E21EF9 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -248,6 +279,15 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(LOCAL_LIBRARY_DIR)/Frameworks/SDL3.xcframework/macos-arm64_x86_64",
+					"$(HOME)/VulkanSDK/1.4.350.1/macOS/Frameworks",
+				);
+				HEADER_SEARCH_PATHS = (
+					"$(HOME)/VulkanSDK/1.4.350.1/macOS/include",
+					"$(LOCAL_LIBRARY_DIR)/Frameworks/SDL3.xcframework/include",
+				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Debug;
@@ -256,6 +296,15 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(LOCAL_LIBRARY_DIR)/Frameworks/SDL3.xcframework/macos-arm64_x86_64",
+					"$(HOME)/VulkanSDK/1.4.350.1/macOS/Frameworks",
+				);
+				HEADER_SEARCH_PATHS = (
+					"$(HOME)/VulkanSDK/1.4.350.1/macOS/include",
+					"$(LOCAL_LIBRARY_DIR)/Frameworks/SDL3.xcframework/include",
+				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
